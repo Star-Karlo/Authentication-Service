@@ -1,0 +1,28 @@
+# Build output
+bin/
+*.exe
+
+# Local configuration. .env.example is committed; .env is not.
+.env
+.env.local
+
+# Signing keys. The development pair is generated with `make keys`; production
+# keys belong in a secrets manager and must never be committed.
+.keys/
+*.pem
+
+# Service account credentials
+*credentials*.json
+!*.example.json
+
+# Go
+vendor/
+*.test
+*.out
+coverage.*
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

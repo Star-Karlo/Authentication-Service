@@ -1,0 +1,52 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - bodyclose
+    - errcheck
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - noctx
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - staticcheck
+    - unconvert
+    - unparam
+    - unused
+
+  settings:
+    gosec:
+      excludes:
+        # Subprocess execution: not used by these services.
+        - G204
+    revive:
+      rules:
+        # Doc comments are enforced by review rather than by the linter, since
+        # the useful ones explain why rather than restating the name.
+        - name: exported
+          disabled: true
+
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          # Test fixtures deliberately contain credential-shaped strings.
+          - gosec
+          # Test helpers take parameters that vary across the suite even when a
+          # single test happens to pass one value.
+          - unparam
+          # noctx guards against context-less outbound requests in production
+          # code. A test building an inbound request for a handler has no
+          # context to propagate.
+          - noctx
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

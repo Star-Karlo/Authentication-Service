@@ -1,0 +1,491 @@
+basePath: /api/v1
+definitions:
+  github_com_karlo_authentication-service_internal_models.Company:
+    properties:
+      address:
+        type: string
+      bankAccount:
+        $ref: '#/definitions/github_com_karlo_authentication-service_internal_models.JSONMap'
+      bannerUrl:
+        type: string
+      cityId:
+        type: string
+      companyProfile:
+        type: string
+      createdAt:
+        type: string
+      emailRecipients:
+        items:
+          type: string
+        type: array
+      id:
+        type: string
+      isSuspended:
+        type: boolean
+      isVerified:
+        type: boolean
+      legacyId:
+        type: string
+      logoUrl:
+        type: string
+      name:
+        type: string
+      noSiup:
+        type: string
+      noTdp:
+        type: string
+      npwp:
+        type: string
+      provinceId:
+        type: string
+      role:
+        type: string
+      settings:
+        $ref: '#/definitions/github_com_karlo_authentication-service_internal_models.CompanySettings'
+      updatedAt:
+        type: string
+    type: object
+  github_com_karlo_authentication-service_internal_models.CompanySettings:
+    properties:
+      accessTolls:
+        type: boolean
+      activeAgreementVerifiedOnly:
+        type: boolean
+      cancelWithValidate:
+        type: boolean
+      finishWithGeofencing:
+        type: boolean
+      maxDriverAvailableAfterOrderDone:
+        type: integer
+      pph23Percentage:
+        type: number
+      ppnPercentage:
+        type: number
+      useStrictAgreement:
+        type: boolean
+    type: object
+  github_com_karlo_authentication-service_internal_models.JSONMap:
+    additionalProperties: true
+    type: object
+  github_com_karlo_authentication-service_internal_models.Permission:
+    additionalProperties:
+      additionalProperties:
+        type: boolean
+      type: object
+    type: object
+  github_com_karlo_authentication-service_internal_models.User:
+    properties:
+      acceptedTncAt:
+        description: |-
+          The column tag is explicit: GORM's default naming would derive
+          "accepted_tn_c_at" from the capital C, which does not exist.
+        type: string
+      accountType:
+        type: string
+      address:
+        type: string
+      alternativePhones:
+        $ref: '#/definitions/github_com_karlo_authentication-service_internal_models.JSONMap'
+      averageRating:
+        type: number
+      birthDate:
+        type: string
+      cityId:
+        type: string
+      company:
+        $ref: '#/definitions/github_com_karlo_authentication-service_internal_models.Company'
+      companyId:
+        type: string
+      createdAt:
+        type: string
+      email:
+        type: string
+      emergencyContactName:
+        type: string
+      emergencyContactPhone:
+        type: string
+      fullName:
+        type: string
+      id:
+        type: string
+      isEmailVerified:
+        type: boolean
+      isPhoneVerified:
+        type: boolean
+      isSuspended:
+        type: boolean
+      isVerified:
+        type: boolean
+      language:
+        type: string
+      lastLoginAt:
+        type: string
+      legacyId:
+        type: string
+      parentId:
+        type: string
+      permission:
+        $ref: '#/definitions/github_com_karlo_authentication-service_internal_models.Permission'
+      phone:
+        type: string
+      photoUrl:
+        type: string
+      ratingCount:
+        type: integer
+      role:
+        type: string
+      updatedAt:
+        type: string
+      username:
+        type: string
+    type: object
+  github_com_karlo_authentication-service_internal_platform_response.Meta:
+    properties:
+      limit:
+        type: integer
+      page:
+        type: integer
+      totalPages:
+        type: integer
+      totalRows:
+        type: integer
+    type: object
+  github_com_karlo_authentication-service_internal_services.LoginResult:
+    properties:
+      tokens:
+        $ref: '#/definitions/github_com_karlo_authentication-service_internal_services.TokenPair'
+      user:
+        $ref: '#/definitions/github_com_karlo_authentication-service_internal_models.User'
+    type: object
+  github_com_karlo_authentication-service_internal_services.TokenPair:
+    properties:
+      accessToken:
+        type: string
+      expiresAt:
+        type: string
+      refreshToken:
+        type: string
+      tokenType:
+        type: string
+    type: object
+  internal_handlers.loginRequest:
+    properties:
+      deviceId:
+        type: string
+      email:
+        type: string
+      password:
+        type: string
+      phone:
+        type: string
+      platform:
+        type: string
+      username:
+        description: |-
+          The legacy clients send whichever of these they collected, so all three
+          are accepted and folded into one identifier.
+        type: string
+    required:
+    - password
+    type: object
+  internal_handlers.registerRequest:
+    properties:
+      companyName:
+        type: string
+      email:
+        type: string
+      fullName:
+        type: string
+      password:
+        type: string
+      phone:
+        type: string
+      role:
+        type: string
+      username:
+        type: string
+    required:
+    - password
+    - role
+    type: object
+host: localhost:5001
+info:
+  contact:
+    email: engineering@karlo.co.id
+    name: Karlo Engineering
+  description: Identity, company membership, sessions, permissions and API keys.\n\nThis
+    service is the authority on who a caller is. It signs RS256 tokens with a private
+    key it alone holds; every other service verifies them locally with the public
+    key.
+  termsOfService: https://karlo.co.id/terms
+  title: Karlo Authentication API
+  version: "1.0"
+paths:
+  /auth/change-password:
+    post:
+      consumes:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Change password
+      tags:
+      - Auth
+  /auth/check-available/{kind}:
+    get:
+      parameters:
+      - description: email|username|phone
+        in: path
+        name: kind
+        required: true
+        type: string
+      - description: Value to check
+        in: query
+        name: value
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+      summary: Check identifier availability
+      tags:
+      - Auth
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Credentials
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.loginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_karlo_authentication-service_internal_services.LoginResult'
+      summary: Login
+      tags:
+      - Auth
+  /auth/logout:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Logout
+      tags:
+      - Auth
+  /auth/logout-all:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Logout from all devices
+      tags:
+      - Auth
+  /auth/me:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_karlo_authentication-service_internal_models.User'
+      security:
+      - BearerAuth: []
+      summary: Current user
+      tags:
+      - Auth
+  /auth/refresh:
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_karlo_authentication-service_internal_services.TokenPair'
+      summary: Refresh access token
+      tags:
+      - Auth
+  /auth/register:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Registration
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.registerRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_karlo_authentication-service_internal_models.User'
+      summary: Register
+      tags:
+      - Auth
+  /auth/register-member:
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_karlo_authentication-service_internal_models.User'
+      security:
+      - BearerAuth: []
+      summary: Register a company member
+      tags:
+      - Auth
+  /users:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_karlo_authentication-service_internal_platform_response.Meta'
+      security:
+      - BearerAuth: []
+      summary: List users
+      tags:
+      - Users
+  /users/{id}:
+    delete:
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete user
+      tags:
+      - Users
+    get:
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_karlo_authentication-service_internal_models.User'
+      security:
+      - BearerAuth: []
+      summary: Get user
+      tags:
+      - Users
+    put:
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update user
+      tags:
+      - Users
+  /users/{id}/permission:
+    put:
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Set user permissions
+      tags:
+      - Users
+  /users/{id}/suspend:
+    put:
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Suspend or restore user
+      tags:
+      - Users
+  /users/me:
+    put:
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update own profile
+      tags:
+      - Users
+schemes:
+- http
+- https
+securityDefinitions:
+  BearerAuth:
+    description: RS256 access token issued by the authentication service, as "Bearer
+      <token>".
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

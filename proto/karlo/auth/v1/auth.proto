@@ -1,0 +1,181 @@
+syntax = "proto3";
+
+package karlo.auth.v1;
+
+import "google/protobuf/timestamp.proto";
+import "karlo/common/v1/common.proto";
+
+// AuthService is the authority on identity, company membership and permissions.
+// Every other service depends on it; it depends on nobody.
+service AuthService {
+  // ValidateToken is the fallback path for tokens that cannot be verified
+  // locally: the 32-character static API tokens, and any token whose session
+  // must be confirmed against the single-device (tokenKapps) rule. Services
+  // SHOULD verify ordinary JWTs locally with the shared public key and call
+  // this only when local verification is not possible.
+  rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+
+  // GetUser resolves one user, including the permission map callers need to
+  // enforce module-level access.
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+
+  // GetUsers resolves many users in one round trip. Logic that fans a
+  // notification out to a role or a company uses this rather than N GetUser
+  // calls.
+  rpc GetUsers(GetUsersRequest) returns (GetUsersResponse);
+
+  // CheckPermission answers a single module.action question, applying the same
+  // parent/child account rules the legacy EnsureModule middleware applied.
+  rpc CheckPermission(CheckPermissionRequest) returns (CheckPermissionResponse);
+
+  // GetCompany resolves a company together with the settings business rules read.
+  rpc GetCompany(GetCompanyRequest) returns (GetCompanyResponse);
+
+  // ListCompanyMembers returns the users belonging to a company, optionally
+  // narrowed to a role. Used to resolve notification audiences such as
+  // "all warehouse PICs of this shipper".
+  rpc ListCompanyMembers(ListCompanyMembersRequest) returns (ListCompanyMembersResponse);
+
+  // ResolveDeliveryTargets returns push tokens, email addresses and phone
+  // numbers for a set of users. This is the contract the notification service
+  // uses, so contact details never have to be duplicated out of this database.
+  rpc ResolveDeliveryTargets(ResolveDeliveryTargetsRequest) returns (ResolveDeliveryTargetsResponse);
+}
+
+message User {
+  string id = 1;
+  string username = 2;
+  string email = 3;
+  string phone = 4;
+  string full_name = 5;
+  string role = 6;
+  // account_type is "mainAccount" for a company root account, "subAccount" for
+  // a member created by a parent.
+  string account_type = 7;
+  string parent_id = 8;
+  string company_id = 9;
+  bool is_suspended = 10;
+  bool is_verified = 11;
+  bool deleted = 12;
+  string language = 13;
+  // permission is the module.action map, nested one level: module -> action -> bool.
+  map<string, PermissionModule> permission = 14;
+  google.protobuf.Timestamp created_at = 15;
+  google.protobuf.Timestamp updated_at = 16;
+}
+
+message PermissionModule {
+  map<string, bool> actions = 1;
+}
+
+message Company {
+  string id = 1;
+  string name = 2;
+  string role = 3;
+  string npwp = 4;
+  string address = 5;
+  CompanySettings settings = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+
+// CompanySettings carries the per-company business toggles the legacy
+// User.setting subdocument held. Business rules read these; they are served
+// from here so there is a single owner.
+message CompanySettings {
+  bool cancel_with_validate = 1;
+  bool finish_with_geofencing = 2;
+  bool active_agreement_verified_only = 3;
+  double ppn_percentage = 4;
+  double pph23_percentage = 5;
+  bool use_strict_agreement = 6;
+  int32 max_driver_available_after_order_done = 7;
+  bool access_tolls = 8;
+}
+
+message ValidateTokenRequest {
+  string token = 1;
+}
+
+message ValidateTokenResponse {
+  bool valid = 1;
+  User user = 2;
+  // reason is set when valid is false, carrying the same message the legacy
+  // middleware returned so existing clients keep their behaviour.
+  string reason = 3;
+  TokenKind kind = 4;
+}
+
+enum TokenKind {
+  TOKEN_KIND_UNSPECIFIED = 0;
+  TOKEN_KIND_JWT = 1;
+  TOKEN_KIND_STATIC = 2;
+}
+
+message GetUserRequest {
+  string id = 1;
+  // include_deleted mirrors the legacy withDeleted query option.
+  bool include_deleted = 2;
+}
+
+message GetUserResponse {
+  User user = 1;
+}
+
+message GetUsersRequest {
+  repeated string ids = 1;
+  bool include_deleted = 2;
+}
+
+message GetUsersResponse {
+  repeated User users = 1;
+}
+
+message CheckPermissionRequest {
+  string user_id = 1;
+  string module = 2;
+  string action = 3;
+}
+
+message CheckPermissionResponse {
+  bool allowed = 1;
+}
+
+message GetCompanyRequest {
+  string id = 1;
+}
+
+message GetCompanyResponse {
+  Company company = 1;
+}
+
+message ListCompanyMembersRequest {
+  string company_id = 1;
+  // roles narrows the result; empty means every role.
+  repeated string roles = 2;
+  karlo.common.v1.Query query = 3;
+}
+
+message ListCompanyMembersResponse {
+  repeated User users = 1;
+  karlo.common.v1.PageInfo page_info = 2;
+}
+
+message ResolveDeliveryTargetsRequest {
+  repeated string user_ids = 1;
+}
+
+// DeliveryTarget is one user's reachable addresses.
+message DeliveryTarget {
+  string user_id = 1;
+  string push_token = 2;
+  string email = 3;
+  string phone = 4;
+  string language = 5;
+  // extra_email_recipients mirrors User.emailRecipient: addresses copied on
+  // document mail for this account.
+  repeated string extra_email_recipients = 6;
+}
+
+message ResolveDeliveryTargetsResponse {
+  repeated DeliveryTarget targets = 1;
+}

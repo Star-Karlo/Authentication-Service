@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The floor is set by gin and grpc, which both require 1.25.
+env:
+  GO_VERSION: "1.25"
+
+jobs:
+  build:
+    name: Build, test and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Unit tests
+        run: go test ./... -race -cover
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+  contracts:
+    name: Proto contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install buf and plugins
+        run: |
+          go install github.com/bufbuild/buf/cmd/buf@latest
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+      - name: Lint contracts
+        working-directory: proto
+        run: buf lint
+
+      # The bindings are committed. If regenerating changes them, either a
+      # .proto was edited without rerunning `make proto`, or this repo's copy of
+      # the contracts has drifted from the one it was generated against.
+      - name: Bindings are current
+        run: |
+          make proto
+          git diff --exit-code -- internal/platform/genproto \
+            || { echo "::error::Bindings are stale. Run 'make proto' and commit."; exit 1; }
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: karlo
+          POSTGRES_PASSWORD: karlo
+          POSTGRES_DB: karlo_auth_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U karlo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Apply migrations
+        env:
+          PGPASSWORD: karlo
+        run: |
+          for f in migrations/*.up.sql; do
+            psql -h localhost -U karlo -d karlo_auth_test -v ON_ERROR_STOP=1 -f "$f"
+          done
+      # These carry a build tag, so they never run in the unit job. They cover
+      # what unit tests structurally cannot: real SQL, real indexes, and
+      # concurrency against a real transaction manager.
+      - name: Integration tests
+        env:
+          AUTH_TEST_DSN: postgres://karlo:karlo@localhost:5432/karlo_auth_test?sslmode=disable
+        run: go test -tags=integration ./tests/integration/... -race -v
+
+  swagger:
+    name: OpenAPI document is current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # Pinned: the CLI and the swaggo/swag library must match, or the generated
+      # docs.go references struct fields the library does not have.
+      - name: Install swag
+        run: go install github.com/swaggo/swag/cmd/swag@v1.16.4
+
+      # A published document that has drifted from the code is worse than no
+      # document, because clients trust it.
+      - name: Regenerate and compare
+        run: |
+          make swagger
+          git diff --exit-code -- docs \
+            || { echo "::error::OpenAPI document is stale. Run 'make swagger' and commit."; exit 1; }
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

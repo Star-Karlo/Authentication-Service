@@ -1,0 +1,281 @@
+syntax = "proto3";
+
+package karlo.notification.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "karlo/common/v1/common.proto";
+
+// NotificationService is the single outbound-messaging boundary.
+//
+// It absorbs four things that were previously separate in the monolith:
+//
+//   1. The Notification mongo model in karlo_be / karlo_order, whose
+//      post('save') hook fanned out to FCM. 70 creation sites in karlo_be and
+//      47 in karlo_order now become Notify calls.
+//   2. The Message / MessageGroup / MessageTemplate in-app chat, which had its
+//      own independent FCM hook.
+//   3. The nodemailer email sender, called directly from five controllers.
+//   4. The WhatsApp Cloud API, OTP and support-ticket features of
+//      communication-service-be.
+//
+// The key design point: a caller states WHO to reach and WHAT happened. This
+// service decides WHICH channels to use, renders the template, and delivers.
+// Callers never name FCM, SMTP or WhatsApp.
+service NotificationService {
+  // Notify records a notification and delivers it on every channel the event
+  // type and the recipient's preferences call for. This is the RPC that the
+  // ~117 legacy Notification.create sites map onto.
+  rpc Notify(NotifyRequest) returns (NotifyResponse);
+
+  // NotifyBatch delivers several unrelated notifications in one round trip.
+  // Bulk order flows use it to avoid a call per row.
+  rpc NotifyBatch(NotifyBatchRequest) returns (NotifyBatchResponse);
+
+  // ListNotifications serves a user's in-app notification inbox.
+  rpc ListNotifications(ListNotificationsRequest) returns (ListNotificationsResponse);
+
+  // CountUnread backs the badge count.
+  rpc CountUnread(CountUnreadRequest) returns (CountUnreadResponse);
+
+  // MarkRead marks specific notifications, or a user's whole inbox, as read.
+  rpc MarkRead(MarkReadRequest) returns (MarkReadResponse);
+
+  // SendOtp issues and delivers a one-time password over WhatsApp.
+  rpc SendOtp(SendOtpRequest) returns (SendOtpResponse);
+
+  // VerifyOtp checks a code and consumes it.
+  rpc VerifyOtp(VerifyOtpRequest) returns (VerifyOtpResponse);
+
+  // SendDocumentEmail delivers a rendered document (invoice, POD, order
+  // confirmation) as mail with attachments. This replaces the direct
+  // nodemailer calls that were scattered through the order and shipment
+  // controllers.
+  rpc SendDocumentEmail(SendDocumentEmailRequest) returns (SendDocumentEmailResponse);
+
+  // RegisterDeviceToken records a device's push token. The token itself is
+  // stored by the authentication service; this RPC forwards it there and keeps
+  // the delivery-side device record.
+  rpc RegisterDeviceToken(RegisterDeviceTokenRequest) returns (RegisterDeviceTokenResponse);
+}
+
+// Channel is a delivery mechanism.
+enum Channel {
+  CHANNEL_UNSPECIFIED = 0;
+  // CHANNEL_IN_APP persists the notification for the inbox only.
+  CHANNEL_IN_APP = 1;
+  CHANNEL_PUSH = 2;
+  CHANNEL_EMAIL = 3;
+  CHANNEL_WHATSAPP = 4;
+}
+
+// EventType identifies what happened. The service maps each event to a default
+// channel set and a message template, which is why callers do not pass copy.
+// The values mirror the `type` strings the legacy Notification model documented.
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_ORDER_CREATED = 1;
+  EVENT_TYPE_ORDER_UPDATED = 2;
+  EVENT_TYPE_ORDER_CANCELLED = 3;
+  EVENT_TYPE_ORDER_READY_TO_PLAN = 4;
+  EVENT_TYPE_ORDER_ASSIGNED_DRIVER = 5;
+  EVENT_TYPE_ORDER_REQUEST_DELIVERY = 6;
+  EVENT_TYPE_ORDER_APPROVAL_REQUIRED = 7;
+  EVENT_TYPE_AGREEMENT_CREATED = 8;
+  EVENT_TYPE_AGREEMENT_APPROVED = 9;
+  EVENT_TYPE_AGREEMENT_REJECTED = 10;
+  EVENT_TYPE_AGREEMENT_EXPIRED = 11;
+  EVENT_TYPE_SHIPMENT_STARTED = 12;
+  EVENT_TYPE_SHIPMENT_ARRIVED_LOADING = 13;
+  EVENT_TYPE_SHIPMENT_LOADED = 14;
+  EVENT_TYPE_SHIPMENT_ARRIVED_UNLOADING = 15;
+  EVENT_TYPE_SHIPMENT_FINISHED = 16;
+  EVENT_TYPE_INVOICE_ISSUED = 17;
+  EVENT_TYPE_INVOICE_PAID = 18;
+  EVENT_TYPE_DRIVER_INVITED = 19;
+  EVENT_TYPE_COLLABORATION_INVITED = 20;
+  EVENT_TYPE_TRUCK_DRIVER_PAIRED = 21;
+  EVENT_TYPE_TASK_ASSIGNED = 22;
+  EVENT_TYPE_CHAT_MESSAGE = 23;
+  EVENT_TYPE_OTP = 24;
+}
+
+// Audience states who should receive a notification. Exactly one field is set.
+// Resolving a role or company audience is the notification service's job, done
+// through the authentication service, so business logic never has to fetch user
+// lists just to send a message.
+message Audience {
+  oneof target {
+    UserList users = 1;
+    CompanyRole company_role = 2;
+    TruckGroup truck_group = 3;
+    PhoneNumber phone = 4;
+  }
+}
+
+message UserList {
+  repeated string user_ids = 1;
+}
+
+message CompanyRole {
+  string company_id = 1;
+  repeated string roles = 2;
+}
+
+message TruckGroup {
+  string truck_group_id = 1;
+}
+
+message PhoneNumber {
+  string number = 1;
+}
+
+message NotifyRequest {
+  EventType event = 1;
+  Audience audience = 2;
+  // subject_id is the id of the thing the event is about: the order, the
+  // agreement, the invoice. It becomes the deep link target in the mobile app.
+  string subject_id = 3;
+  string subject_type = 4;
+  // params feed the message template. Templates are owned by this service, so
+  // callers pass data, not prose.
+  google.protobuf.Struct params = 5;
+  // channels overrides the default channel set for the event. Leave empty to
+  // accept the default.
+  repeated Channel channels = 6;
+  // idempotency_key makes retries safe. A repeat within the dedupe window
+  // returns the original notification instead of delivering twice.
+  string idempotency_key = 7;
+  // actor_id is the user who caused the event; they are excluded from the
+  // audience so nobody is notified of their own action.
+  string actor_id = 8;
+}
+
+message NotifyResponse {
+  string notification_id = 1;
+  // delivered reports per-channel outcomes. Delivery is best-effort: a push
+  // failure does not fail the RPC, because the in-app record is the source of
+  // truth.
+  repeated ChannelResult delivered = 2;
+  bool deduplicated = 3;
+}
+
+message ChannelResult {
+  Channel channel = 1;
+  bool success = 2;
+  int32 recipient_count = 3;
+  string error = 4;
+}
+
+message NotifyBatchRequest {
+  repeated NotifyRequest notifications = 1;
+}
+
+message NotifyBatchResponse {
+  repeated NotifyResponse results = 1;
+}
+
+message Notification {
+  string id = 1;
+  EventType event = 2;
+  string title = 3;
+  string description = 4;
+  string subject_id = 5;
+  string subject_type = 6;
+  bool read = 7;
+  google.protobuf.Struct params = 8;
+  google.protobuf.Timestamp created_at = 9;
+}
+
+message ListNotificationsRequest {
+  string user_id = 1;
+  karlo.common.v1.Query query = 2;
+  bool unread_only = 3;
+}
+
+message ListNotificationsResponse {
+  repeated Notification notifications = 1;
+  karlo.common.v1.PageInfo page_info = 2;
+}
+
+message CountUnreadRequest {
+  string user_id = 1;
+}
+
+message CountUnreadResponse {
+  int64 count = 1;
+}
+
+message MarkReadRequest {
+  string user_id = 1;
+  // notification_ids empty together with all=true marks the whole inbox.
+  repeated string notification_ids = 2;
+  bool all = 3;
+}
+
+message MarkReadResponse {
+  int64 updated = 1;
+}
+
+message SendOtpRequest {
+  string phone_number = 1;
+  // purpose distinguishes registration, login and phone-change flows so codes
+  // issued for one cannot be spent on another.
+  string purpose = 2;
+  string language = 3;
+}
+
+message SendOtpResponse {
+  bool sent = 1;
+  google.protobuf.Timestamp expires_at = 2;
+  // retry_after_seconds is set when the request was rate limited.
+  int32 retry_after_seconds = 3;
+}
+
+message VerifyOtpRequest {
+  string phone_number = 1;
+  string code = 2;
+  string purpose = 3;
+}
+
+message VerifyOtpResponse {
+  bool verified = 1;
+  string reason = 2;
+  // attempts_remaining lets the caller show a useful error before lockout.
+  int32 attempts_remaining = 3;
+}
+
+message EmailAttachment {
+  string filename = 1;
+  string content_type = 2;
+  bytes content = 3;
+  // url is an alternative to inline content for large documents already in S3.
+  string url = 4;
+}
+
+message SendDocumentEmailRequest {
+  repeated string to = 1;
+  repeated string cc = 2;
+  // template names a template owned by this service, e.g. "invoice_issued".
+  string template = 3;
+  google.protobuf.Struct params = 4;
+  repeated EmailAttachment attachments = 5;
+  string language = 6;
+}
+
+message SendDocumentEmailResponse {
+  bool sent = 1;
+  string message_id = 2;
+  string error = 3;
+}
+
+message RegisterDeviceTokenRequest {
+  string user_id = 1;
+  string push_token = 2;
+  string platform = 3;
+  string device_id = 4;
+}
+
+message RegisterDeviceTokenResponse {
+  bool registered = 1;
+}

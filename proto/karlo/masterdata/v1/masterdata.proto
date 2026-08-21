@@ -1,0 +1,217 @@
+syntax = "proto3";
+
+package karlo.masterdata.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "karlo/common/v1/common.proto";
+
+// MasterDataService owns reference data. It splits into two families:
+//
+//   Global catalogues  - truck types, cargo types, item types, provinces,
+//                        cities, currencies. Shared by every company, edited
+//                        by Karlo staff.
+//   Company catalogues - trucks, truck groups, warehouses, customers, points,
+//                        saved routes. Owned by one company, edited by that
+//                        company.
+//
+// Both live in MongoDB because the shapes are heterogeneous and read-mostly.
+service MasterDataService {
+  // GetCatalogItem resolves one entry from a global catalogue.
+  rpc GetCatalogItem(GetCatalogItemRequest) returns (GetCatalogItemResponse);
+
+  // ListCatalogItems pages through a global catalogue.
+  rpc ListCatalogItems(ListCatalogItemsRequest) returns (ListCatalogItemsResponse);
+
+  // ResolveCatalogItems batch-resolves catalogue references so a caller can
+  // denormalise many foreign keys in one round trip. Callers that render an
+  // order list use this instead of one lookup per row.
+  rpc ResolveCatalogItems(ResolveCatalogItemsRequest) returns (ResolveCatalogItemsResponse);
+
+  // ValidateReferences checks that a set of catalogue references exists before
+  // the business service commits a write. Returns the invalid ones.
+  rpc ValidateReferences(ValidateReferencesRequest) returns (ValidateReferencesResponse);
+
+  rpc GetTruck(GetTruckRequest) returns (GetTruckResponse);
+  rpc ListTrucks(ListTrucksRequest) returns (ListTrucksResponse);
+
+  // GetTrucksByDriver supports the assign-driver flow in the business service,
+  // which must know which trucks a driver is paired with.
+  rpc GetTrucksByDriver(GetTrucksByDriverRequest) returns (GetTrucksByDriverResponse);
+
+  rpc GetWarehouse(GetWarehouseRequest) returns (GetWarehouseResponse);
+  rpc ListWarehouses(ListWarehousesRequest) returns (ListWarehousesResponse);
+}
+
+// CatalogKind enumerates the global catalogues. Keeping them behind one RPC
+// pair avoids twenty near-identical services; the kind selects the collection.
+enum CatalogKind {
+  CATALOG_KIND_UNSPECIFIED = 0;
+  CATALOG_KIND_BRAND = 1;
+  CATALOG_KIND_CARGO_TYPE = 2;
+  CATALOG_KIND_CARGO_TRUCK_CAPACITY = 3;
+  CATALOG_KIND_CURRENCY = 4;
+  CATALOG_KIND_DISTRICT = 5;
+  CATALOG_KIND_ITEM = 6;
+  CATALOG_KIND_ITEM_CHARACTER = 7;
+  CATALOG_KIND_ITEM_TYPE = 8;
+  CATALOG_KIND_KOTA = 9;
+  CATALOG_KIND_PAYMENT_TYPE = 10;
+  CATALOG_KIND_PRICING_TYPE = 11;
+  CATALOG_KIND_PROVINSI = 12;
+  CATALOG_KIND_RATE_CARD = 13;
+  CATALOG_KIND_REQUIREMENT = 14;
+  CATALOG_KIND_ROUTE = 15;
+  CATALOG_KIND_TRUCK_BODY = 16;
+  CATALOG_KIND_TRUCK_HEAD = 17;
+  CATALOG_KIND_TRUCK_TYPE = 18;
+  CATALOG_KIND_FAQ = 19;
+  CATALOG_KIND_JOB_VACANCY = 20;
+}
+
+// CatalogItem is the common envelope over every global catalogue. The shared
+// fields are promoted; everything catalogue-specific stays in attributes so a
+// new catalogue does not require a contract change.
+message CatalogItem {
+  string id = 1;
+  CatalogKind kind = 2;
+  string code = 3;
+  string name = 4;
+  string description = 5;
+  bool active = 6;
+  google.protobuf.Struct attributes = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+}
+
+message GetCatalogItemRequest {
+  CatalogKind kind = 1;
+  string id = 2;
+}
+
+message GetCatalogItemResponse {
+  CatalogItem item = 1;
+}
+
+message ListCatalogItemsRequest {
+  CatalogKind kind = 1;
+  karlo.common.v1.Query query = 2;
+  // parent_id filters hierarchical catalogues: cities within a province,
+  // districts within a city.
+  string parent_id = 3;
+}
+
+message ListCatalogItemsResponse {
+  repeated CatalogItem items = 1;
+  karlo.common.v1.PageInfo page_info = 2;
+}
+
+// CatalogRef names one entry to resolve.
+message CatalogRef {
+  CatalogKind kind = 1;
+  string id = 2;
+}
+
+message ResolveCatalogItemsRequest {
+  repeated CatalogRef refs = 1;
+}
+
+message ResolveCatalogItemsResponse {
+  repeated CatalogItem items = 1;
+}
+
+message ValidateReferencesRequest {
+  repeated CatalogRef refs = 1;
+}
+
+message ValidateReferencesResponse {
+  bool valid = 1;
+  // invalid lists the refs that could not be resolved.
+  repeated CatalogRef invalid = 2;
+}
+
+// Truck is company-owned master data: the vehicle register.
+message Truck {
+  string id = 1;
+  string company_id = 2;
+  string police_number = 3;
+  string truck_type_id = 4;
+  string truck_head_id = 5;
+  string truck_body_id = 6;
+  string brand_id = 7;
+  int32 year = 8;
+  string chassis_number = 9;
+  string engine_number = 10;
+  // driver_ids are the drivers currently paired with this truck.
+  repeated string driver_ids = 11;
+  string truck_group_id = 12;
+  string status = 13;
+  bool is_available = 14;
+  google.protobuf.Struct documents = 15;
+  bool deleted = 16;
+  google.protobuf.Timestamp created_at = 17;
+  google.protobuf.Timestamp updated_at = 18;
+}
+
+message GetTruckRequest {
+  string id = 1;
+}
+
+message GetTruckResponse {
+  Truck truck = 1;
+}
+
+message ListTrucksRequest {
+  string company_id = 1;
+  karlo.common.v1.Query query = 2;
+}
+
+message ListTrucksResponse {
+  repeated Truck trucks = 1;
+  karlo.common.v1.PageInfo page_info = 2;
+}
+
+message GetTrucksByDriverRequest {
+  string driver_id = 1;
+}
+
+message GetTrucksByDriverResponse {
+  repeated Truck trucks = 1;
+}
+
+// Warehouse is company-owned master data: loading and unloading points.
+message Warehouse {
+  string id = 1;
+  string company_id = 2;
+  string name = 3;
+  string address = 4;
+  string city_id = 5;
+  string province_id = 6;
+  double latitude = 7;
+  double longitude = 8;
+  // geofence_radius_meters drives the finish-with-geofencing company setting.
+  int32 geofence_radius_meters = 9;
+  string pic_name = 10;
+  string pic_phone = 11;
+  bool deleted = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp updated_at = 14;
+}
+
+message GetWarehouseRequest {
+  string id = 1;
+}
+
+message GetWarehouseResponse {
+  Warehouse warehouse = 1;
+}
+
+message ListWarehousesRequest {
+  string company_id = 1;
+  karlo.common.v1.Query query = 2;
+}
+
+message ListWarehousesResponse {
+  repeated Warehouse warehouses = 1;
+  karlo.common.v1.PageInfo page_info = 2;
+}

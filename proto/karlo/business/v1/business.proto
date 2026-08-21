@@ -1,0 +1,185 @@
+syntax = "proto3";
+
+package karlo.business.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "karlo/common/v1/common.proto";
+
+// BusinessService owns the transactional core: agreements, orders, the shipment
+// lifecycle and invoices. It is the only service that writes to those tables.
+//
+// The RPCs here are deliberately narrow. Most business interaction happens over
+// this service's own REST API, which the front ends call. gRPC exists for what
+// OTHER services need to ask, which is mostly read-side: the notification
+// service resolving a subject for a deep link, the accounting service (already
+// separate) pulling invoices, the telemetry service (already separate)
+// correlating a GPS fix with an active shipment.
+service BusinessService {
+  rpc GetOrder(GetOrderRequest) returns (GetOrderResponse);
+  rpc ListOrders(ListOrdersRequest) returns (ListOrdersResponse);
+
+  // GetOrderSummary returns the small projection other services need to render
+  // a reference to an order without pulling the whole aggregate.
+  rpc GetOrderSummary(GetOrderSummaryRequest) returns (GetOrderSummaryResponse);
+
+  rpc GetAgreement(GetAgreementRequest) returns (GetAgreementResponse);
+  rpc GetInvoice(GetInvoiceRequest) returns (GetInvoiceResponse);
+
+  // GetActiveShipmentByDriver tells the telemetry service which shipment a
+  // driver's position updates belong to.
+  rpc GetActiveShipmentByDriver(GetActiveShipmentByDriverRequest) returns (GetActiveShipmentByDriverResponse);
+
+  // ReportGeofenceEvent is the inbound edge from telemetry: it reports that a
+  // tracked truck entered or left a warehouse geofence, which can advance the
+  // shipment state machine when the company has finish-with-geofencing on.
+  rpc ReportGeofenceEvent(ReportGeofenceEventRequest) returns (ReportGeofenceEventResponse);
+}
+
+message Order {
+  string id = 1;
+  string order_number = 2;
+  string agreement_id = 3;
+  string shipper_company_id = 4;
+  string transporter_company_id = 5;
+  string driver_id = 6;
+  string truck_id = 7;
+  string origin_warehouse_id = 8;
+  string destination_warehouse_id = 9;
+  string status_code = 10;
+  string status = 11;
+  string status_alias = 12;
+  google.protobuf.Timestamp pickup_at = 13;
+  google.protobuf.Timestamp delivery_at = 14;
+  double price = 15;
+  string currency_id = 16;
+  string parent_order_id = 17;
+  bool deleted = 18;
+  google.protobuf.Struct detail = 19;
+  google.protobuf.Timestamp created_at = 20;
+  google.protobuf.Timestamp updated_at = 21;
+}
+
+// OrderSummary is the cross-service projection of an order.
+message OrderSummary {
+  string id = 1;
+  string order_number = 2;
+  string status_code = 3;
+  string status = 4;
+  string shipper_company_id = 5;
+  string transporter_company_id = 6;
+  string driver_id = 7;
+}
+
+message GetOrderRequest {
+  string id = 1;
+}
+
+message GetOrderResponse {
+  Order order = 1;
+}
+
+message ListOrdersRequest {
+  // company_id scopes the listing. Required: there is no unscoped order list.
+  string company_id = 1;
+  karlo.common.v1.Query query = 2;
+}
+
+message ListOrdersResponse {
+  repeated Order orders = 1;
+  karlo.common.v1.PageInfo page_info = 2;
+}
+
+message GetOrderSummaryRequest {
+  repeated string ids = 1;
+}
+
+message GetOrderSummaryResponse {
+  repeated OrderSummary summaries = 1;
+}
+
+message Agreement {
+  string id = 1;
+  string agreement_number = 2;
+  string shipper_company_id = 3;
+  string transporter_company_id = 4;
+  string status_code = 5;
+  string status = 6;
+  google.protobuf.Timestamp valid_from = 7;
+  google.protobuf.Timestamp valid_until = 8;
+  bool verified = 9;
+  google.protobuf.Struct detail = 10;
+  google.protobuf.Timestamp created_at = 11;
+}
+
+message GetAgreementRequest {
+  string id = 1;
+}
+
+message GetAgreementResponse {
+  Agreement agreement = 1;
+}
+
+message Invoice {
+  string id = 1;
+  string invoice_number = 2;
+  string order_id = 3;
+  string shipper_company_id = 4;
+  string transporter_company_id = 5;
+  string status_code = 6;
+  double subtotal = 7;
+  double ppn = 8;
+  double pph23 = 9;
+  double total = 10;
+  string currency_id = 11;
+  google.protobuf.Timestamp issued_at = 12;
+  google.protobuf.Timestamp paid_at = 13;
+}
+
+message GetInvoiceRequest {
+  string id = 1;
+}
+
+message GetInvoiceResponse {
+  Invoice invoice = 1;
+}
+
+message Shipment {
+  string id = 1;
+  string order_id = 2;
+  string driver_id = 3;
+  string truck_id = 4;
+  string status_code = 5;
+  google.protobuf.Timestamp started_at = 6;
+  google.protobuf.Timestamp finished_at = 7;
+}
+
+message GetActiveShipmentByDriverRequest {
+  string driver_id = 1;
+}
+
+message GetActiveShipmentByDriverResponse {
+  Shipment shipment = 1;
+  bool found = 2;
+}
+
+enum GeofenceTransition {
+  GEOFENCE_TRANSITION_UNSPECIFIED = 0;
+  GEOFENCE_TRANSITION_ENTER = 1;
+  GEOFENCE_TRANSITION_EXIT = 2;
+}
+
+message ReportGeofenceEventRequest {
+  string shipment_id = 1;
+  string warehouse_id = 2;
+  GeofenceTransition transition = 3;
+  google.protobuf.Timestamp occurred_at = 4;
+  double latitude = 5;
+  double longitude = 6;
+}
+
+message ReportGeofenceEventResponse {
+  bool accepted = 1;
+  // new_status_code is set when the event advanced the shipment state machine.
+  string new_status_code = 2;
+}

@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package karlo.common.v1;
+
+// Page describes a request for one page of a listing.
+message Page {
+  int32 page = 1;
+  int32 page_size = 2;
+}
+
+// PageInfo describes the pagination state of a listing response.
+message PageInfo {
+  int32 page = 1;
+  int32 page_size = 2;
+  int64 total_rows = 3;
+  int32 total_pages = 4;
+}
+
+// Filter mirrors the {id, value} filter objects the legacy REST API accepts in
+// its `filtered` query parameter, so the same client filters survive the split.
+message Filter {
+  string id = 1;
+  string value = 2;
+  Operator operator = 3;
+}
+
+enum Operator {
+  OPERATOR_UNSPECIFIED = 0;
+  OPERATOR_EQ = 1;
+  OPERATOR_NEQ = 2;
+  OPERATOR_LIKE = 3;
+  OPERATOR_IN = 4;
+  OPERATOR_GT = 5;
+  OPERATOR_GTE = 6;
+  OPERATOR_LT = 7;
+  OPERATOR_LTE = 8;
+  OPERATOR_BETWEEN = 9;
+}
+
+// Sort mirrors the legacy `sorted` query parameter.
+message Sort {
+  string id = 1;
+  bool desc = 2;
+}
+
+// Query bundles the three listing parameters every service accepts.
+message Query {
+  Page page = 1;
+  repeated Filter filtered = 2;
+  repeated Sort sorted = 3;
+  string search = 4;
+}
