@@ -1641,8 +1641,8 @@ const file_karlo_masterdata_v1_masterdata_proto_rawDesc = "" +
 	"ListTrucks\x12&.karlo.masterdata.v1.ListTrucksRequest\x1a'.karlo.masterdata.v1.ListTrucksResponse\x12r\n" +
 	"\x11GetTrucksByDriver\x12-.karlo.masterdata.v1.GetTrucksByDriverRequest\x1a..karlo.masterdata.v1.GetTrucksByDriverResponse\x12c\n" +
 	"\fGetWarehouse\x12(.karlo.masterdata.v1.GetWarehouseRequest\x1a).karlo.masterdata.v1.GetWarehouseResponse\x12i\n" +
-	"\x0eListWarehouses\x12*.karlo.masterdata.v1.ListWarehousesRequest\x1a+.karlo.masterdata.v1.ListWarehousesResponseB\xe4\x01\n" +
-	"\x17com.karlo.masterdata.v1B\x0fMasterdataProtoP\x01ZJgithub.com/karlo/authentication-service/internal/platform/genproto/karlo/masterdata/v1;masterdatav1\xa2\x02\x03KMX\xaa\x02\x13Karlo.Masterdata.V1\xca\x02\x13Karlo\\Masterdata\\V1\xe2\x02\x1fKarlo\\Masterdata\\V1\\GPBMetadata\xea\x02\x15Karlo::Masterdata::V1b\x06proto3"
+	"\x0eListWarehouses\x12*.karlo.masterdata.v1.ListWarehousesRequest\x1a+.karlo.masterdata.v1.ListWarehousesResponseB\xfd\x01\n" +
+	"\x17com.karlo.masterdata.v1B\x0fMasterdataProtoP\x01Zcgithub.com/karlo/authentication-service/internal/platform/genproto/karlo/masterdata/v1;masterdatav1\xa2\x02\x03KMX\xaa\x02\x13Karlo.Masterdata.V1\xca\x02\x13Karlo\\Masterdata\\V1\xe2\x02\x1fKarlo\\Masterdata\\V1\\GPBMetadata\xea\x02\x15Karlo::Masterdata::V1b\x06proto3"
 
 var (
 	file_karlo_masterdata_v1_masterdata_proto_rawDescOnce sync.Once

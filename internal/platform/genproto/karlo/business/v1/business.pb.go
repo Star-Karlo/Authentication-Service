@@ -1558,8 +1558,8 @@ const file_karlo_business_v1_business_proto_rawDesc = "" +
 	"\n" +
 	"GetInvoice\x12$.karlo.business.v1.GetInvoiceRequest\x1a%.karlo.business.v1.GetInvoiceResponse\x12\x86\x01\n" +
 	"\x19GetActiveShipmentByDriver\x123.karlo.business.v1.GetActiveShipmentByDriverRequest\x1a4.karlo.business.v1.GetActiveShipmentByDriverResponse\x12t\n" +
-	"\x13ReportGeofenceEvent\x12-.karlo.business.v1.ReportGeofenceEventRequest\x1a..karlo.business.v1.ReportGeofenceEventResponseB\xd4\x01\n" +
-	"\x15com.karlo.business.v1B\rBusinessProtoP\x01ZFgithub.com/karlo/authentication-service/internal/platform/genproto/karlo/business/v1;businessv1\xa2\x02\x03KBX\xaa\x02\x11Karlo.Business.V1\xca\x02\x11Karlo\\Business\\V1\xe2\x02\x1dKarlo\\Business\\V1\\GPBMetadata\xea\x02\x13Karlo::Business::V1b\x06proto3"
+	"\x13ReportGeofenceEvent\x12-.karlo.business.v1.ReportGeofenceEventRequest\x1a..karlo.business.v1.ReportGeofenceEventResponseB\xed\x01\n" +
+	"\x15com.karlo.business.v1B\rBusinessProtoP\x01Z_github.com/karlo/authentication-service/internal/platform/genproto/karlo/business/v1;businessv1\xa2\x02\x03KBX\xaa\x02\x11Karlo.Business.V1\xca\x02\x11Karlo\\Business\\V1\xe2\x02\x1dKarlo\\Business\\V1\\GPBMetadata\xea\x02\x13Karlo::Business::V1b\x06proto3"
 
 var (
 	file_karlo_business_v1_business_proto_rawDescOnce sync.Once

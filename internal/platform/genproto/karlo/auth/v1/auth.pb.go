@@ -1379,8 +1379,8 @@ const file_karlo_auth_v1_auth_proto_rawDesc = "" +
 	"\n" +
 	"GetCompany\x12 .karlo.auth.v1.GetCompanyRequest\x1a!.karlo.auth.v1.GetCompanyResponse\x12i\n" +
 	"\x12ListCompanyMembers\x12(.karlo.auth.v1.ListCompanyMembersRequest\x1a).karlo.auth.v1.ListCompanyMembersResponse\x12u\n" +
-	"\x16ResolveDeliveryTargets\x12,.karlo.auth.v1.ResolveDeliveryTargetsRequest\x1a-.karlo.auth.v1.ResolveDeliveryTargetsResponseB\xb4\x01\n" +
-	"\x11com.karlo.auth.v1B\tAuthProtoP\x01Z>github.com/karlo/authentication-service/internal/platform/genproto/karlo/auth/v1;authv1\xa2\x02\x03KAX\xaa\x02\rKarlo.Auth.V1\xca\x02\rKarlo\\Auth\\V1\xe2\x02\x19Karlo\\Auth\\V1\\GPBMetadata\xea\x02\x0fKarlo::Auth::V1b\x06proto3"
+	"\x16ResolveDeliveryTargets\x12,.karlo.auth.v1.ResolveDeliveryTargetsRequest\x1a-.karlo.auth.v1.ResolveDeliveryTargetsResponseB\xcd\x01\n" +
+	"\x11com.karlo.auth.v1B\tAuthProtoP\x01ZWgithub.com/karlo/authentication-service/internal/platform/genproto/karlo/auth/v1;authv1\xa2\x02\x03KAX\xaa\x02\rKarlo.Auth.V1\xca\x02\rKarlo\\Auth\\V1\xe2\x02\x19Karlo\\Auth\\V1\\GPBMetadata\xea\x02\x0fKarlo::Auth::V1b\x06proto3"
 
 var (
 	file_karlo_auth_v1_auth_proto_rawDescOnce sync.Once

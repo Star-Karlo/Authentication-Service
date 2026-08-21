@@ -434,8 +434,8 @@ const file_karlo_common_v1_common_proto_rawDesc = "" +
 	"\fOPERATOR_GTE\x10\x06\x12\x0f\n" +
 	"\vOPERATOR_LT\x10\a\x12\x10\n" +
 	"\fOPERATOR_LTE\x10\b\x12\x14\n" +
-	"\x10OPERATOR_BETWEEN\x10\tB\xc4\x01\n" +
-	"\x13com.karlo.common.v1B\vCommonProtoP\x01ZBgithub.com/karlo/authentication-service/internal/platform/genproto/karlo/common/v1;commonv1\xa2\x02\x03KCX\xaa\x02\x0fKarlo.Common.V1\xca\x02\x0fKarlo\\Common\\V1\xe2\x02\x1bKarlo\\Common\\V1\\GPBMetadata\xea\x02\x11Karlo::Common::V1b\x06proto3"
+	"\x10OPERATOR_BETWEEN\x10\tB\xdd\x01\n" +
+	"\x13com.karlo.common.v1B\vCommonProtoP\x01Z[github.com/karlo/authentication-service/internal/platform/genproto/karlo/common/v1;commonv1\xa2\x02\x03KCX\xaa\x02\x0fKarlo.Common.V1\xca\x02\x0fKarlo\\Common\\V1\xe2\x02\x1bKarlo\\Common\\V1\\GPBMetadata\xea\x02\x11Karlo::Common::V1b\x06proto3"
 
 var (
 	file_karlo_common_v1_common_proto_rawDescOnce sync.Once

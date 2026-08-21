@@ -1,7 +1,7 @@
 SERVICE      := authentication-service
 MIGRATE_URL  ?= postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=disable
 
-.PHONY: tools proto build run test test-integration lint tidy swagger migrate-up migrate-down migrate-create docker keys
+.PHONY: tools proto build run test test-integration test-integration-up test-integration-down lint tidy swagger migrate-up migrate-down migrate-create docker keys
 
 # Install the development tooling this repo needs.
 tools:
@@ -36,10 +36,33 @@ swagger:
 	swag init -g cmd/server/main.go -o docs --parseDependency --parseInternal
 	gofmt -w docs
 
-# Integration tests run against a real database. They carry a build tag, so
-# `make test` never picks them up, and they skip themselves when AUTH_TEST_DSN is
-# unset. `make -C .. test-integration-up` starts throwaway containers.
-AUTH_TEST_DSN ?= postgres://karlo:karlo@localhost:5432/karlo_auth_test?sslmode=disable
+# ---------------------------------------------------------------------------
+# Integration tests
+#
+# These carry a build tag, so `make test` never compiles them, and they skip
+# themselves when AUTH_TEST_DSN is unset. They cover what unit tests structurally
+# cannot: real SQL, real indexes, and concurrency against a real transaction
+# manager.
+# ---------------------------------------------------------------------------
+
+IT_PORT ?= 55432
+AUTH_TEST_DSN ?= postgres://karlo:karlo@localhost:$(IT_PORT)/karlo_auth_test?sslmode=disable
+
+# A throwaway database on a non-default port, so it cannot collide with a
+# Postgres you already run or with another service's test container.
+test-integration-up:
+	docker run -d --name karlo-authentication-it-pg \
+		-e POSTGRES_USER=karlo -e POSTGRES_PASSWORD=karlo -e POSTGRES_DB=karlo_auth_test \
+		-p $(IT_PORT):5432 postgres:16-alpine
+	@echo "waiting for postgres..."
+	@until docker exec karlo-authentication-it-pg pg_isready -U karlo >/dev/null 2>&1; do sleep 1; done
+	@for f in migrations/*.up.sql; do \
+		docker exec -i karlo-authentication-it-pg psql -U karlo -d karlo_auth_test -v ON_ERROR_STOP=1 < "$$f" >/dev/null; \
+	done
+	@echo "ready. Run 'make test-integration'."
+
+test-integration-down:
+	-docker rm -f karlo-authentication-it-pg
 
 test-integration:
 	AUTH_TEST_DSN="$(AUTH_TEST_DSN)" go test -tags=integration ./tests/integration/... -race -v

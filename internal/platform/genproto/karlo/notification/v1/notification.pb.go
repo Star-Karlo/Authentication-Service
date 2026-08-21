@@ -1975,8 +1975,8 @@ const file_karlo_notification_v1_notification_proto_rawDesc = "" +
 	"\aSendOtp\x12%.karlo.notification.v1.SendOtpRequest\x1a&.karlo.notification.v1.SendOtpResponse\x12^\n" +
 	"\tVerifyOtp\x12'.karlo.notification.v1.VerifyOtpRequest\x1a(.karlo.notification.v1.VerifyOtpResponse\x12v\n" +
 	"\x11SendDocumentEmail\x12/.karlo.notification.v1.SendDocumentEmailRequest\x1a0.karlo.notification.v1.SendDocumentEmailResponse\x12|\n" +
-	"\x13RegisterDeviceToken\x121.karlo.notification.v1.RegisterDeviceTokenRequest\x1a2.karlo.notification.v1.RegisterDeviceTokenResponseB\xf4\x01\n" +
-	"\x19com.karlo.notification.v1B\x11NotificationProtoP\x01ZNgithub.com/karlo/authentication-service/internal/platform/genproto/karlo/notification/v1;notificationv1\xa2\x02\x03KNX\xaa\x02\x15Karlo.Notification.V1\xca\x02\x15Karlo\\Notification\\V1\xe2\x02!Karlo\\Notification\\V1\\GPBMetadata\xea\x02\x17Karlo::Notification::V1b\x06proto3"
+	"\x13RegisterDeviceToken\x121.karlo.notification.v1.RegisterDeviceTokenRequest\x1a2.karlo.notification.v1.RegisterDeviceTokenResponseB\x8d\x02\n" +
+	"\x19com.karlo.notification.v1B\x11NotificationProtoP\x01Zggithub.com/karlo/authentication-service/internal/platform/genproto/karlo/notification/v1;notificationv1\xa2\x02\x03KNX\xaa\x02\x15Karlo.Notification.V1\xca\x02\x15Karlo\\Notification\\V1\xe2\x02!Karlo\\Notification\\V1\\GPBMetadata\xea\x02\x17Karlo::Notification::V1b\x06proto3"
 
 var (
 	file_karlo_notification_v1_notification_proto_rawDescOnce sync.Once
