@@ -51,6 +51,15 @@ tests/unit/           no I/O; run always
 tests/integration/    real database; build-tagged
 ```
 
+## Platform documentation
+
+The cross-service documentation — data ownership, business flows, testing and
+observability — is **not in this repository**. It describes all four services,
+so it lives once in the workspace that holds them side by side, at
+`../docs/`, rather than in four drifting copies.
+
+This README covers what is specific to this service.
+
 ## About `internal/platform`
 
 This directory is **vendored, not authored here**. It holds the plumbing every
