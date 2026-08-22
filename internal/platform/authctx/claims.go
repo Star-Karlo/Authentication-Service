@@ -22,20 +22,43 @@ const Issuer = "karlo-authentication-service"
 // what is needed to authorise a request, and nothing that could go stale in a
 // way that matters. Anything richer is fetched from the authentication service.
 type Principal struct {
-	UserID    string `json:"uid"`
-	Role      string `json:"role"`
+	UserID string `json:"uid"`
+
+	// CompanyID is the shared IAM's identifier for the tenant.
 	CompanyID string `json:"cid"`
-	// ParentID is set for sub-accounts. Permission checks only bite when a user
-	// has a parent, matching the legacy EnsureModule rule.
+
+	// FMSTenantID is the same company's FMS-facing alias.
+	//
+	// FMS identifies a tenant by a bigint and its row-level security compares
+	// against it on every query across live customer data. Carrying both here
+	// means neither product translates at runtime: FMS reads this, TMS reads
+	// CompanyID. One concept, one primary key, one recorded alias for a system
+	// that predates the shared IAM.
+	FMSTenantID int64 `json:"tid,omitempty"`
+
+	// IsPlatformStaff marks a Karlo employee, who administers across tenants
+	// and bypasses company entitlement entirely.
+	//
+	// Product-neutral by design. FMS calls this platform_admin and TMS called
+	// it superadmin/admin, but it is one concept and it is not a tenant role —
+	// a Karlo employee is staff across both products, not an administrator of
+	// one.
+	IsPlatformStaff bool `json:"staff,omitempty"`
+
+	// Access holds this person's access per product. A product absent from the
+	// map is a product they cannot use at all, which is the common case rather
+	// than an edge one.
+	Access map[Product]ProductAccess `json:"acc,omitempty"`
+
+	// ParentID is set for sub-accounts. A root account is unrestricted within
+	// its company's entitlement; a sub-account is narrowed by its permissions.
 	ParentID string `json:"pid,omitempty"`
-	// Permission is the module -> action -> bool map, embedded in the token so
-	// module checks need no round trip. It is re-read from the token on every
-	// request, so a permission change takes effect at the next token refresh.
-	Permission map[string]map[string]bool `json:"perm,omitempty"`
+
 	// SingleDevice marks sessions bound to one device (the legacy tokenKapps
-	// rule). Such tokens require confirmation against the authentication
-	// service, because revocation must be immediate.
+	// rule). Such tokens are confirmed against the session store, because
+	// revocation must be immediate.
 	SingleDevice bool `json:"sd,omitempty"`
+
 	// TokenID identifies the session, so it can be revoked individually.
 	TokenID string `json:"jti,omitempty"`
 }
@@ -46,29 +69,53 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-// HasModule reports whether the principal may perform module.action.
+// serviceProduct is the product this service belongs to.
 //
-// The rule reproduces the legacy behaviour deliberately: a main account (no
-// parent) is unrestricted, and only sub-accounts carry a permission map. If you
-// want to tighten this, do it here, in one place, rather than at call sites.
+// Set once at startup by the service's main. It exists so that route guards
+// stay `RequirePermission("order.read")` rather than repeating the product at
+// thirty call sites — every service is exactly one product, and repeating it
+// would be noise that could be got wrong.
+var serviceProduct = ProductTMS
+
+// SetProduct declares which product this service belongs to. Call it once,
+// before serving.
+func SetProduct(p Product) { serviceProduct = p }
+
+// CurrentProduct returns the product this service belongs to.
+func CurrentProduct() Product { return serviceProduct }
+
+// HasModule reports whether the principal may perform module.action in this
+// service's product.
+//
+// A convenience over HasPermission for the `module.action` spelling the route
+// guards use. The gating entitlement is read from the catalogue, not derived
+// from the module name — see PermissionSpec.Feature for why that distinction
+// matters.
 func (p Principal) HasModule(module, action string) bool {
-	if p.ParentID == "" {
-		return true
-	}
-	if p.Permission == nil {
-		return false
-	}
-	actions, ok := p.Permission[module]
-	if !ok {
-		return false
-	}
-	return actions[action]
+	return p.HasPermission(serviceProduct, module+"."+action)
 }
 
-// HasRole reports whether the principal holds any of the given roles.
+// Role returns the principal's role in this service's product.
+//
+// Empty means they have no access to this product at all.
+func (p Principal) Role() string {
+	return p.RoleIn(serviceProduct)
+}
+
+// HasRole reports whether the principal holds any of the given roles in this
+// service's product.
 func (p Principal) HasRole(roles ...string) bool {
+	// Platform staff are not tenant users and hold no tenant role, but they may
+	// do anything a tenant role could.
+	if p.IsPlatformStaff {
+		return true
+	}
+	role := p.RoleIn(serviceProduct)
+	if role == "" {
+		return false
+	}
 	for _, r := range roles {
-		if p.Role == r {
+		if role == r {
 			return true
 		}
 	}

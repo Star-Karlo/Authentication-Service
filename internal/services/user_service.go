@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/karlo/authentication-service/internal/models"
+	"github.com/karlo/authentication-service/internal/platform/authctx"
 	"github.com/karlo/authentication-service/internal/platform/query"
 	"github.com/karlo/authentication-service/internal/repository"
 )
@@ -16,10 +17,15 @@ import (
 // ErrForbidden signals an authorisation failure inside the service layer.
 var ErrForbidden = errors.New("forbidden")
 
+// ErrValidation signals a malformed input, as distinct from a refused one.
+var ErrValidation = errors.New("validation failed")
+
 // UserService manages accounts and their permissions.
 type UserService struct {
 	users     *repository.UserRepository
 	companies *repository.CompanyRepository
+	modules   *repository.ModuleRepository
+	access    *repository.AccessRepository
 	sessions  *repository.SessionRepository
 	audit     *repository.AuditRepository
 	auth      *AuthService
@@ -28,11 +34,13 @@ type UserService struct {
 func NewUserService(
 	users *repository.UserRepository,
 	companies *repository.CompanyRepository,
+	modules *repository.ModuleRepository,
+	access *repository.AccessRepository,
 	sessions *repository.SessionRepository,
 	audit *repository.AuditRepository,
 	auth *AuthService,
 ) *UserService {
-	return &UserService{users: users, companies: companies, sessions: sessions, audit: audit, auth: auth}
+	return &UserService{users: users, companies: companies, modules: modules, access: access, sessions: sessions, audit: audit, auth: auth}
 }
 
 // RegisterInput describes a new account.
@@ -217,10 +225,20 @@ func (s *UserService) AdminUpdate(ctx context.Context, actorID, targetID uuid.UU
 
 // SetPermission replaces a sub-account's permission map.
 //
-// Two rules are enforced. A root account cannot be given a permission map,
-// because root accounts bypass the check and a map there would be misleading.
-// And the actor must belong to the same company as the target.
-func (s *UserService) SetPermission(ctx context.Context, actorID, targetID uuid.UUID, perm models.Permission) error {
+// Four rules are enforced:
+//
+//  1. The actor and the target belong to the same company.
+//  2. A root account cannot carry a permission map, because within its
+//     company's entitlement it is unrestricted and a map there would mislead.
+//  3. Every module named is one the COMPANY is entitled to. This is the rule
+//     that makes the two-tier model hold: an administrator cannot grant
+//     accounting to a colleague when the company was never sold accounting.
+//     Without it the permission editor would offer modules that silently
+//     grant nothing, and an entitlement bought later would retroactively
+//     activate permissions nobody reviewed.
+//  4. Every module and action named actually exists, so a typo becomes an
+//     error rather than a permission that never matches anything.
+func (s *UserService) SetPermission(ctx context.Context, actorID, targetID uuid.UUID, product authctx.Product, permissions []string) error {
 	actor, err := s.users.FindByID(ctx, actorID)
 	if err != nil {
 		return err
@@ -237,7 +255,18 @@ func (s *UserService) SetPermission(ctx context.Context, actorID, targetID uuid.
 		return errors.New("a root account cannot carry a permission map")
 	}
 
-	if err := s.users.UpdateFields(ctx, targetID, map[string]interface{}{"permission": perm}); err != nil {
+	if err := s.assertGrantable(ctx, *target.CompanyID, product, permissions); err != nil {
+		return err
+	}
+
+	if err := s.access.GrantProductAccess(ctx, &models.ProductAccess{
+		UserID:          targetID,
+		Product:         string(product),
+		Role:            target.Role,
+		Permissions:     permissions,
+		Enabled:         true,
+		GrantedByUserID: &actorID,
+	}); err != nil {
 		return err
 	}
 
@@ -373,3 +402,67 @@ func firstNonEmpty(values ...string) string {
 }
 
 var _ = time.Now
+
+// assertGrantable rejects a permission set that reaches outside the company's
+// entitlement, or that names something that does not exist.
+//
+// The entitlement check reads each permission's GATING FEATURE from the
+// catalogue rather than splitting the key on its dot. In FMS `fuel.view` is
+// gated by `live` and `dashcams.manage` by `camera`; deriving the gate from the
+// key would refuse permissions the company legitimately holds.
+func (s *UserService) assertGrantable(ctx context.Context, companyID uuid.UUID, product authctx.Product, permissions []string) error {
+	entitled, err := s.modules.ActiveForCompany(ctx, companyID)
+	if err != nil {
+		return fmt.Errorf("resolve company entitlement: %w", err)
+	}
+
+	held := make(map[string]bool, len(entitled))
+	for _, m := range entitled {
+		held[m] = true
+	}
+
+	for _, key := range permissions {
+		feature, known := authctx.FeatureFor(product, key)
+		if !known {
+			return fmt.Errorf("%w: %q is not a %s permission", ErrValidation, key, product)
+		}
+		// An ungated permission — master data, administration — needs no
+		// entitlement.
+		if feature == "" {
+			continue
+		}
+		if !held[feature] {
+			return fmt.Errorf(
+				"%w: your company is not entitled to %q, which gates %q",
+				ErrForbidden, feature, key)
+		}
+	}
+
+	return nil
+}
+
+// GrantablePermissions returns what an administrator of this company may assign
+// in a product.
+//
+// This is what the permission editor should render: the catalogue narrowed to
+// the company's entitlement. A company without accounting sees no accounting
+// section at all, rather than one that appears to work and then does nothing.
+func (s *UserService) GrantablePermissions(ctx context.Context, companyID uuid.UUID, product authctx.Product) ([]authctx.PermissionSpec, error) {
+	entitled, err := s.modules.ActiveForCompany(ctx, companyID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve company entitlement: %w", err)
+	}
+
+	held := make(map[string]bool, len(entitled))
+	for _, m := range entitled {
+		held[m] = true
+	}
+
+	var out []authctx.PermissionSpec
+	for _, spec := range authctx.CatalogFor(product) {
+		if spec.Feature == "" || held[spec.Feature] {
+			out = append(out, spec)
+		}
+	}
+	return out, nil
+}

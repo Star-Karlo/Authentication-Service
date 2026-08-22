@@ -69,12 +69,15 @@ enum CatalogKind {
   CATALOG_KIND_JOB_VACANCY = 20;
 }
 
-// CatalogItem is the common envelope over every global catalogue. The shared
-// fields are promoted; everything catalogue-specific stays in attributes so a
-// new catalogue does not require a contract change.
+// CatalogItem is the common envelope over every catalogue. The shared fields
+// are promoted; everything catalogue-specific stays in attributes so a new
+// catalogue does not require a contract change.
 message CatalogItem {
   string id = 1;
   CatalogKind kind = 2;
+  // company_id is empty for a platform-global entry, or names the company that
+  // owns a private one.
+  string company_id = 10;
   string code = 3;
   string name = 4;
   string description = 5;
@@ -87,6 +90,11 @@ message CatalogItem {
 message GetCatalogItemRequest {
   CatalogKind kind = 1;
   string id = 2;
+  // company_id scopes the read. A company sees the platform-global entries plus
+  // its own; empty means globals only. It travels in the request because the
+  // caller is another service acting on a company's behalf, so it cannot be
+  // inferred from the connection.
+  string company_id = 3;
 }
 
 message GetCatalogItemResponse {
@@ -99,6 +107,8 @@ message ListCatalogItemsRequest {
   // parent_id filters hierarchical catalogues: cities within a province,
   // districts within a city.
   string parent_id = 3;
+  // company_id scopes the listing; see GetCatalogItemRequest.
+  string company_id = 4;
 }
 
 message ListCatalogItemsResponse {
@@ -114,6 +124,9 @@ message CatalogRef {
 
 message ResolveCatalogItemsRequest {
   repeated CatalogRef refs = 1;
+  // company_id scopes the resolution, so one company's private entries are
+  // never returned to another.
+  string company_id = 2;
 }
 
 message ResolveCatalogItemsResponse {
@@ -122,6 +135,10 @@ message ResolveCatalogItemsResponse {
 
 message ValidateReferencesRequest {
   repeated CatalogRef refs = 1;
+  // company_id scopes the check. A reference to another company's private
+  // catalogue entry must come back invalid, not valid — otherwise a company
+  // could point an order at data it cannot see.
+  string company_id = 2;
 }
 
 message ValidateReferencesResponse {

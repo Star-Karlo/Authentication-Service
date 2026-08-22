@@ -26,3 +26,13 @@ coverage.*
 .idea/
 .vscode/
 *.swp
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+# Real variable files name where production secrets live; only the example is
+# committed.
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl

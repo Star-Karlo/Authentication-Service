@@ -18,6 +18,7 @@ import (
 	"github.com/karlo/authentication-service/internal/grpcserver"
 	"github.com/karlo/authentication-service/internal/handlers"
 	"github.com/karlo/authentication-service/internal/platform/authctx"
+	"github.com/karlo/authentication-service/internal/platform/cache"
 	authv1 "github.com/karlo/authentication-service/internal/platform/genproto/karlo/auth/v1"
 	"github.com/karlo/authentication-service/internal/platform/grpcutil"
 	"github.com/karlo/authentication-service/internal/platform/logger"
@@ -58,6 +59,10 @@ func run() error {
 	// Logs go to stdout as JSON, and additionally to Fluentd when
 	// FLUENTD_HOST is set. An unreachable collector degrades to
 	// stdout-only rather than stopping the service.
+	// This service belongs to TMS; authctx resolves the convenience helpers
+	// (HasModule, Role, HasRole) against it.
+	authctx.SetProduct(authctx.ProductTMS)
+
 	logger.InitFromEnv("authentication")
 	defer logger.Close()
 
@@ -73,15 +78,26 @@ func run() error {
 		return err
 	}
 
+	// Optional. Without REDIS_ADDR this is a no-op and the login rate limiter
+	// falls back to counting audit rows.
+	cacheClient := cache.FromEnv("authentication")
+	defer func() {
+		if err := cacheClient.Close(); err != nil {
+			slog.Error("cache close failed", "error", err)
+		}
+	}()
+
 	userRepo := repository.NewUserRepository(db)
 	companyRepo := repository.NewCompanyRepository(db)
 	sessionRepo := repository.NewSessionRepository(db)
 	apiKeyRepo := repository.NewAPIKeyRepository(db)
 	deviceRepo := repository.NewDeviceTokenRepository(db)
 	auditRepo := repository.NewAuditRepository(db)
+	moduleRepo := repository.NewModuleRepository(db)
+	accessRepo := repository.NewAccessRepository(db)
 
-	authService := services.NewAuthService(userRepo, sessionRepo, apiKeyRepo, deviceRepo, auditRepo, signer, cfg)
-	userService := services.NewUserService(userRepo, companyRepo, sessionRepo, auditRepo, authService)
+	authService := services.NewAuthService(userRepo, sessionRepo, apiKeyRepo, deviceRepo, moduleRepo, accessRepo, auditRepo, signer, cacheClient, cfg)
+	userService := services.NewUserService(userRepo, companyRepo, moduleRepo, accessRepo, sessionRepo, auditRepo, authService)
 
 	grpcSrv := grpcutil.NewServer(grpcutil.ServerConfig{
 		Service:               "authentication",
@@ -92,7 +108,7 @@ func run() error {
 	})
 	authv1.RegisterAuthServiceServer(
 		grpcSrv.Registrar(),
-		grpcserver.New(authService, userService, companyRepo, deviceRepo, userRepo),
+		grpcserver.New(authService, userService, companyRepo, accessRepo, deviceRepo, userRepo),
 	)
 
 	router := routes.Setup(routes.Deps{

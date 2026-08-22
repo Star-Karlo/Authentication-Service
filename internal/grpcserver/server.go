@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/karlo/authentication-service/internal/models"
+	"github.com/karlo/authentication-service/internal/platform/authctx"
 	authv1 "github.com/karlo/authentication-service/internal/platform/genproto/karlo/auth/v1"
 	"github.com/karlo/authentication-service/internal/platform/query"
 	"github.com/karlo/authentication-service/internal/platform/safeconv"
@@ -25,6 +26,7 @@ type Server struct {
 	auth      *services.AuthService
 	users     *services.UserService
 	companies *repository.CompanyRepository
+	access    *repository.AccessRepository
 	devices   *repository.DeviceTokenRepository
 	userRepo  *repository.UserRepository
 }
@@ -33,10 +35,11 @@ func New(
 	auth *services.AuthService,
 	users *services.UserService,
 	companies *repository.CompanyRepository,
+	access *repository.AccessRepository,
 	devices *repository.DeviceTokenRepository,
 	userRepo *repository.UserRepository,
 ) *Server {
-	return &Server{auth: auth, users: users, companies: companies, devices: devices, userRepo: userRepo}
+	return &Server{auth: auth, users: users, companies: companies, access: access, devices: devices, userRepo: userRepo}
 }
 
 // ValidateToken resolves any credential into a principal.
@@ -61,7 +64,7 @@ func (s *Server) ValidateToken(ctx context.Context, req *authv1.ValidateTokenReq
 
 	return &authv1.ValidateTokenResponse{
 		Valid: true,
-		User:  toProtoUser(user),
+		User:  toProtoUser(user, principal.Access),
 		Kind:  kind,
 	}, nil
 }
@@ -85,7 +88,12 @@ func (s *Server) GetUser(ctx context.Context, req *authv1.GetUserRequest) (*auth
 		return nil, status.Error(codes.Internal, "failed to load user")
 	}
 
-	return &authv1.GetUserResponse{User: toProtoUser(user)}, nil
+	access, aerr := s.access.BuildAccess(ctx, user.ID, user.CompanyID)
+	if aerr != nil {
+		return nil, status.Error(codes.Internal, "failed to load product access")
+	}
+
+	return &authv1.GetUserResponse{User: toProtoUser(user, access)}, nil
 }
 
 // GetUsers resolves a batch. Ids that do not parse are skipped rather than
@@ -109,7 +117,14 @@ func (s *Server) GetUsers(ctx context.Context, req *authv1.GetUsersRequest) (*au
 
 	out := make([]*authv1.User, 0, len(users))
 	for i := range users {
-		out = append(out, toProtoUser(&users[i]))
+		// Access is loaded per user. A batch of forty is forty small
+		// indexed reads; the alternative is one join that would have to
+		// reassemble two one-to-many relations in Go anyway.
+		access, aerr := s.access.BuildAccess(ctx, users[i].ID, users[i].CompanyID)
+		if aerr != nil {
+			return nil, status.Error(codes.Internal, "failed to load product access")
+		}
+		out = append(out, toProtoUser(&users[i], access))
 	}
 	return &authv1.GetUsersResponse{Users: out}, nil
 }
@@ -162,7 +177,14 @@ func (s *Server) ListCompanyMembers(ctx context.Context, req *authv1.ListCompany
 
 	out := make([]*authv1.User, 0, len(users))
 	for i := range users {
-		out = append(out, toProtoUser(&users[i]))
+		// Access is loaded per user. A batch of forty is forty small
+		// indexed reads; the alternative is one join that would have to
+		// reassemble two one-to-many relations in Go anyway.
+		access, aerr := s.access.BuildAccess(ctx, users[i].ID, users[i].CompanyID)
+		if aerr != nil {
+			return nil, status.Error(codes.Internal, "failed to load product access")
+		}
+		out = append(out, toProtoUser(&users[i], access))
 	}
 
 	return &authv1.ListCompanyMembersResponse{
@@ -253,31 +275,44 @@ func (s *Server) ResolveDeliveryTargets(ctx context.Context, req *authv1.Resolve
 // Mapping
 // ---------------------------------------------------------------------------
 
-func toProtoUser(u *models.User) *authv1.User {
+// toProtoUser maps a user onto the contract.
+//
+// access is the per-product map, which the caller loads. It is passed in rather
+// than fetched here because the two callers differ: ValidateToken has already
+// built it while resolving the token, and refetching would double the work on
+// the hottest path in the service.
+func toProtoUser(u *models.User, access map[authctx.Product]authctx.ProductAccess) *authv1.User {
 	if u == nil {
 		return nil
 	}
 
-	perm := make(map[string]*authv1.PermissionModule, len(u.Permission))
-	for module, actions := range u.Permission {
-		perm[module] = &authv1.PermissionModule{Actions: actions}
+	protoAccess := make(map[string]*authv1.ProductAccess, len(access))
+	for product, a := range access {
+		protoAccess[string(product)] = &authv1.ProductAccess{
+			Role:        a.Role,
+			Permissions: a.Permissions,
+			Features:    a.Features,
+		}
 	}
 
 	out := &authv1.User{
-		Id:          u.ID.String(),
-		Username:    deref(u.Username),
-		Email:       deref(u.Email),
-		Phone:       deref(u.Phone),
-		FullName:    deref(u.FullName),
-		Role:        u.Role,
-		AccountType: u.AccountType,
-		IsSuspended: u.IsSuspended,
-		IsVerified:  u.IsVerified,
-		Deleted:     u.DeletedAt.Valid,
-		Language:    u.Language,
-		Permission:  perm,
-		CreatedAt:   timestamppb.New(u.CreatedAt),
-		UpdatedAt:   timestamppb.New(u.UpdatedAt),
+		Id:              u.ID.String(),
+		Username:        deref(u.Username),
+		Email:           deref(u.Email),
+		Phone:           deref(u.Phone),
+		FullName:        deref(u.FullName),
+		AccountType:     u.AccountType,
+		IsSuspended:     u.IsSuspended,
+		IsVerified:      u.IsVerified,
+		Deleted:         u.DeletedAt.Valid,
+		Language:        u.Language,
+		Access:          protoAccess,
+		IsPlatformStaff: u.IsPlatformStaff,
+		CreatedAt:       timestamppb.New(u.CreatedAt),
+		UpdatedAt:       timestamppb.New(u.UpdatedAt),
+	}
+	if u.Company != nil && u.Company.FMSTenantID != nil {
+		out.FmsTenantId = *u.Company.FMSTenantID
 	}
 	if u.ParentID != nil {
 		out.ParentId = u.ParentID.String()

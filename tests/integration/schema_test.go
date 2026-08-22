@@ -37,6 +37,9 @@ func TestModelColumnsMatchTheSchema(t *testing.T) {
 		{"UserDocument", &models.UserDocument{}, "user_documents"},
 		{"CollaborationInvite", &models.CollaborationInvite{}, "collaboration_invites"},
 		{"AuditEntry", &models.AuditEntry{}, "auth_audit_log"},
+		{"CompanyModule", &models.CompanyModule{}, "company_modules"},
+		{"CompanyModuleEvent", &models.CompanyModuleEvent{}, "company_module_history"},
+		{"ProductAccess", &models.ProductAccess{}, "user_product_access"},
 	}
 
 	for _, entity := range entities {

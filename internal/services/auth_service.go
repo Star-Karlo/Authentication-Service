@@ -19,6 +19,7 @@ import (
 	"github.com/karlo/authentication-service/internal/config"
 	"github.com/karlo/authentication-service/internal/models"
 	"github.com/karlo/authentication-service/internal/platform/authctx"
+	"github.com/karlo/authentication-service/internal/platform/cache"
 	"github.com/karlo/authentication-service/internal/repository"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -47,9 +48,12 @@ type AuthService struct {
 	sessions *repository.SessionRepository
 	apiKeys  *repository.APIKeyRepository
 	devices  *repository.DeviceTokenRepository
+	modules  *repository.ModuleRepository
+	access   *repository.AccessRepository
 	audit    *repository.AuditRepository
 	signer   *authctx.Signer
 	verifier *authctx.Verifier
+	cache    cache.Cache
 	cfg      *config.Config
 }
 
@@ -58,8 +62,11 @@ func NewAuthService(
 	sessions *repository.SessionRepository,
 	apiKeys *repository.APIKeyRepository,
 	devices *repository.DeviceTokenRepository,
+	modules *repository.ModuleRepository,
+	access *repository.AccessRepository,
 	audit *repository.AuditRepository,
 	signer *authctx.Signer,
+	c cache.Cache,
 	cfg *config.Config,
 ) *AuthService {
 	return &AuthService{
@@ -67,9 +74,12 @@ func NewAuthService(
 		sessions: sessions,
 		apiKeys:  apiKeys,
 		devices:  devices,
+		modules:  modules,
+		access:   access,
 		audit:    audit,
 		signer:   signer,
 		verifier: signer.Public(),
+		cache:    c,
 		cfg:      cfg,
 	}
 }
@@ -144,6 +154,8 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*LoginResult, e
 		return nil, err
 	}
 
+	s.clearRateLimit(ctx, identifier)
+
 	if err := s.users.TouchLastLogin(ctx, user.ID); err != nil {
 		slog.Warn("failed to record last login", "user_id", user.ID, "error", err)
 	}
@@ -192,7 +204,7 @@ func (s *AuthService) issueSession(ctx context.Context, user *models.User, in Lo
 		}
 	}
 
-	access, expiresAt, err := s.mintAccessToken(user, tokenID, singleDevice)
+	access, expiresAt, err := s.mintAccessToken(ctx, user, tokenID, singleDevice)
 	if err != nil {
 		return nil, err
 	}
@@ -208,15 +220,15 @@ func (s *AuthService) issueSession(ctx context.Context, user *models.User, in Lo
 	}, nil
 }
 
-func (s *AuthService) mintAccessToken(user *models.User, tokenID uuid.UUID, singleDevice bool) (string, time.Time, error) {
+func (s *AuthService) mintAccessToken(ctx context.Context, user *models.User, tokenID uuid.UUID, singleDevice bool) (string, time.Time, error) {
 	now := time.Now()
 	expiresAt := now.Add(s.cfg.AccessTokenTTL)
 
 	principal := authctx.Principal{
-		UserID:       user.ID.String(),
-		Role:         user.Role,
-		SingleDevice: singleDevice,
-		TokenID:      tokenID.String(),
+		UserID:          user.ID.String(),
+		IsPlatformStaff: user.IsPlatformStaff,
+		SingleDevice:    singleDevice,
+		TokenID:         tokenID.String(),
 	}
 	if user.CompanyID != nil {
 		principal.CompanyID = user.CompanyID.String()
@@ -224,8 +236,27 @@ func (s *AuthService) mintAccessToken(user *models.User, tokenID uuid.UUID, sing
 	if user.ParentID != nil {
 		principal.ParentID = user.ParentID.String()
 	}
-	if len(user.Permission) > 0 {
-		principal.Permission = user.Permission
+
+	// The per-product access map: which products this person may use, in what
+	// role, with which permissions, and what their company is entitled to in
+	// each. Embedded so no service has to ask again on the request path.
+	//
+	// A lookup failure mints a token with NO access rather than broad access.
+	// That fails closed — the holder authenticates but reaches nothing, which a
+	// refresh fixes. Failing open would hand out a token granting modules the
+	// company never bought, valid until it expired.
+	access, aerr := s.access.BuildAccess(ctx, user.ID, user.CompanyID)
+	if aerr != nil {
+		slog.Error("could not load product access; minting a token with none",
+			"user_id", user.ID, "error", aerr)
+	} else {
+		principal.Access = access
+	}
+
+	// The company's FMS-facing alias, so FMS reads its bigint tenant id
+	// straight from the token instead of translating the UUID per request.
+	if user.Company != nil && user.Company.FMSTenantID != nil {
+		principal.FMSTenantID = *user.Company.FMSTenantID
 	}
 
 	token, err := s.signer.Sign(principal, jwt.RegisteredClaims{
@@ -288,7 +319,7 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*TokenP
 		return nil, fmt.Errorf("refresh: %w", err)
 	}
 
-	access, expiresAt, err := s.mintAccessToken(user, newTokenID, session.SingleDevice)
+	access, expiresAt, err := s.mintAccessToken(ctx, user, newTokenID, session.SingleDevice)
 	if err != nil {
 		return nil, err
 	}
@@ -375,9 +406,8 @@ func (s *AuthService) validateAPIKey(ctx context.Context, key string) (authctx.P
 	s.apiKeys.TouchLastUsed(ctx, apiKey.ID)
 
 	principal := authctx.Principal{
-		UserID:     user.ID.String(),
-		Role:       user.Role,
-		Permission: user.Permission,
+		UserID:          user.ID.String(),
+		IsPlatformStaff: user.IsPlatformStaff,
 	}
 	if user.CompanyID != nil {
 		principal.CompanyID = user.CompanyID.String()
@@ -385,6 +415,16 @@ func (s *AuthService) validateAPIKey(ctx context.Context, key string) (authctx.P
 	if user.ParentID != nil {
 		principal.ParentID = user.ParentID.String()
 	}
+
+	// An API key is subject to exactly the same access as a login. Omitting
+	// this would make a key a way around both the entitlement and the
+	// per-product gate.
+	access, aerr := s.access.BuildAccess(ctx, user.ID, user.CompanyID)
+	if aerr != nil {
+		return authctx.Principal{}, nil, fmt.Errorf("resolve product access: %w", aerr)
+	}
+	principal.Access = access
+
 	return principal, user, nil
 }
 
@@ -489,13 +529,40 @@ func (s *AuthService) CreateAPIKey(ctx context.Context, name string, userID, com
 	return plaintext, key, nil
 }
 
+// isRateLimited reports whether an identifier has exhausted its login attempts.
+//
+// Redis first, the audit log second. The counter is a single INCR against a
+// keyspace built for it; the fallback is a COUNT over a growing audit table
+// with a JSONB predicate — a query that gets slower exactly as the table grows,
+// which is to say under attack. The fallback runs only when Redis is absent or
+// unreachable, so the limiter survives a cache outage.
 func (s *AuthService) isRateLimited(ctx context.Context, identifier string) (bool, error) {
-	since := time.Now().Add(-s.cfg.LoginRateWindow)
-	count, err := s.audit.CountRecentFailures(ctx, identifier, since)
-	if err != nil {
-		return false, err
+	key := cache.Key("auth", "login", "attempts", cache.Fingerprint(strings.ToLower(identifier)))
+
+	count, err := s.cache.Increment(ctx, key, s.cfg.LoginRateWindow)
+	if err == nil {
+		return count > int64(s.cfg.LoginRateLimit), nil
 	}
-	return count >= int64(s.cfg.LoginRateLimit), nil
+	if !errors.Is(err, cache.ErrNoCache) {
+		slog.Warn("login rate limiting fell back to the audit log", "error", err)
+	}
+
+	since := time.Now().Add(-s.cfg.LoginRateWindow)
+	dbCount, dbErr := s.audit.CountRecentFailures(ctx, identifier, since)
+	if dbErr != nil {
+		return false, dbErr
+	}
+	return dbCount >= int64(s.cfg.LoginRateLimit), nil
+}
+
+// clearRateLimit forgets an identifier's failed attempts after a success.
+//
+// Without it, someone who mistypes four times then gets it right stays one
+// attempt from lockout for the rest of the window. The counter exists to slow
+// guessing, not to punish typing.
+func (s *AuthService) clearRateLimit(ctx context.Context, identifier string) {
+	s.cache.Delete(ctx, cache.Key("auth", "login", "attempts",
+		cache.Fingerprint(strings.ToLower(identifier))))
 }
 
 func (s *AuthService) recordLoginFailure(ctx context.Context, userID *uuid.UUID, identifier string, in LoginInput, reason string) {

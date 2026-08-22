@@ -1,0 +1,41 @@
+# CodeBuild specification.
+#
+# Builds the container image, pushes it to ECR, and emits the file CodePipeline
+# hands to ECS to say which image the new task definition should run.
+
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - echo "Logging in to ECR"
+      - aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REPOSITORY"
+      # Tag by commit SHA, never by 'latest'. A tag must always mean the same
+      # image, or a rollback cannot name what to roll back to. The ECR
+      # repository is configured IMMUTABLE for the same reason.
+      - IMAGE_TAG="sha-${CODEBUILD_RESOLVED_SOURCE_VERSION:0:12}"
+      - echo "Building $IMAGE_TAG"
+
+  build:
+    commands:
+      # The tests are run by GitHub Actions on every pull request. Running them
+      # again here would double the wait on every deploy for the same answer;
+      # what CodeBuild is for is producing the artefact.
+      - docker build -t "$ECR_REPOSITORY:$IMAGE_TAG" .
+
+  post_build:
+    commands:
+      - docker push "$ECR_REPOSITORY:$IMAGE_TAG"
+      - |
+        printf '[{"name":"%s","imageUri":"%s"}]' \
+          "$CONTAINER_NAME" "$ECR_REPOSITORY:$IMAGE_TAG" > imagedefinitions.json
+      - cat imagedefinitions.json
+
+artifacts:
+  files:
+    - imagedefinitions.json
+
+cache:
+  paths:
+    - '/root/.cache/go-build/**/*'
+    - '/go/pkg/mod/**/*'

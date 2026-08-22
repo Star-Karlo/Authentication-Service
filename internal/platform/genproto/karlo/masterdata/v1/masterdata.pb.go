@@ -129,13 +129,16 @@ func (CatalogKind) EnumDescriptor() ([]byte, []int) {
 	return file_karlo_masterdata_v1_masterdata_proto_rawDescGZIP(), []int{0}
 }
 
-// CatalogItem is the common envelope over every global catalogue. The shared
-// fields are promoted; everything catalogue-specific stays in attributes so a
-// new catalogue does not require a contract change.
+// CatalogItem is the common envelope over every catalogue. The shared fields
+// are promoted; everything catalogue-specific stays in attributes so a new
+// catalogue does not require a contract change.
 type CatalogItem struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Kind          CatalogKind            `protobuf:"varint,2,opt,name=kind,proto3,enum=karlo.masterdata.v1.CatalogKind" json:"kind,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Kind  CatalogKind            `protobuf:"varint,2,opt,name=kind,proto3,enum=karlo.masterdata.v1.CatalogKind" json:"kind,omitempty"`
+	// company_id is empty for a platform-global entry, or names the company that
+	// owns a private one.
+	CompanyId     string                 `protobuf:"bytes,10,opt,name=company_id,json=companyId,proto3" json:"company_id,omitempty"`
 	Code          string                 `protobuf:"bytes,3,opt,name=code,proto3" json:"code,omitempty"`
 	Name          string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
 	Description   string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
@@ -191,6 +194,13 @@ func (x *CatalogItem) GetKind() CatalogKind {
 	return CatalogKind_CATALOG_KIND_UNSPECIFIED
 }
 
+func (x *CatalogItem) GetCompanyId() string {
+	if x != nil {
+		return x.CompanyId
+	}
+	return ""
+}
+
 func (x *CatalogItem) GetCode() string {
 	if x != nil {
 		return x.Code
@@ -241,9 +251,14 @@ func (x *CatalogItem) GetUpdatedAt() *timestamppb.Timestamp {
 }
 
 type GetCatalogItemRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Kind          CatalogKind            `protobuf:"varint,1,opt,name=kind,proto3,enum=karlo.masterdata.v1.CatalogKind" json:"kind,omitempty"`
-	Id            string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Kind  CatalogKind            `protobuf:"varint,1,opt,name=kind,proto3,enum=karlo.masterdata.v1.CatalogKind" json:"kind,omitempty"`
+	Id    string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	// company_id scopes the read. A company sees the platform-global entries plus
+	// its own; empty means globals only. It travels in the request because the
+	// caller is another service acting on a company's behalf, so it cannot be
+	// inferred from the connection.
+	CompanyId     string `protobuf:"bytes,3,opt,name=company_id,json=companyId,proto3" json:"company_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -288,6 +303,13 @@ func (x *GetCatalogItemRequest) GetKind() CatalogKind {
 func (x *GetCatalogItemRequest) GetId() string {
 	if x != nil {
 		return x.Id
+	}
+	return ""
+}
+
+func (x *GetCatalogItemRequest) GetCompanyId() string {
+	if x != nil {
+		return x.CompanyId
 	}
 	return ""
 }
@@ -342,7 +364,9 @@ type ListCatalogItemsRequest struct {
 	Query *v1.Query              `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
 	// parent_id filters hierarchical catalogues: cities within a province,
 	// districts within a city.
-	ParentId      string `protobuf:"bytes,3,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
+	ParentId string `protobuf:"bytes,3,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
+	// company_id scopes the listing; see GetCatalogItemRequest.
+	CompanyId     string `protobuf:"bytes,4,opt,name=company_id,json=companyId,proto3" json:"company_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -394,6 +418,13 @@ func (x *ListCatalogItemsRequest) GetQuery() *v1.Query {
 func (x *ListCatalogItemsRequest) GetParentId() string {
 	if x != nil {
 		return x.ParentId
+	}
+	return ""
+}
+
+func (x *ListCatalogItemsRequest) GetCompanyId() string {
+	if x != nil {
+		return x.CompanyId
 	}
 	return ""
 }
@@ -504,8 +535,11 @@ func (x *CatalogRef) GetId() string {
 }
 
 type ResolveCatalogItemsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Refs          []*CatalogRef          `protobuf:"bytes,1,rep,name=refs,proto3" json:"refs,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Refs  []*CatalogRef          `protobuf:"bytes,1,rep,name=refs,proto3" json:"refs,omitempty"`
+	// company_id scopes the resolution, so one company's private entries are
+	// never returned to another.
+	CompanyId     string `protobuf:"bytes,2,opt,name=company_id,json=companyId,proto3" json:"company_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -545,6 +579,13 @@ func (x *ResolveCatalogItemsRequest) GetRefs() []*CatalogRef {
 		return x.Refs
 	}
 	return nil
+}
+
+func (x *ResolveCatalogItemsRequest) GetCompanyId() string {
+	if x != nil {
+		return x.CompanyId
+	}
+	return ""
 }
 
 type ResolveCatalogItemsResponse struct {
@@ -592,8 +633,12 @@ func (x *ResolveCatalogItemsResponse) GetItems() []*CatalogItem {
 }
 
 type ValidateReferencesRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Refs          []*CatalogRef          `protobuf:"bytes,1,rep,name=refs,proto3" json:"refs,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Refs  []*CatalogRef          `protobuf:"bytes,1,rep,name=refs,proto3" json:"refs,omitempty"`
+	// company_id scopes the check. A reference to another company's private
+	// catalogue entry must come back invalid, not valid — otherwise a company
+	// could point an order at data it cannot see.
+	CompanyId     string `protobuf:"bytes,2,opt,name=company_id,json=companyId,proto3" json:"company_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -633,6 +678,13 @@ func (x *ValidateReferencesRequest) GetRefs() []*CatalogRef {
 		return x.Refs
 	}
 	return nil
+}
+
+func (x *ValidateReferencesRequest) GetCompanyId() string {
+	if x != nil {
+		return x.CompanyId
+	}
+	return ""
 }
 
 type ValidateReferencesResponse struct {
@@ -1496,10 +1548,13 @@ var File_karlo_masterdata_v1_masterdata_proto protoreflect.FileDescriptor
 
 const file_karlo_masterdata_v1_masterdata_proto_rawDesc = "" +
 	"\n" +
-	"$karlo/masterdata/v1/masterdata.proto\x12\x13karlo.masterdata.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ckarlo/common/v1/common.proto\"\xe4\x02\n" +
+	"$karlo/masterdata/v1/masterdata.proto\x12\x13karlo.masterdata.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ckarlo/common/v1/common.proto\"\x83\x03\n" +
 	"\vCatalogItem\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x124\n" +
-	"\x04kind\x18\x02 \x01(\x0e2 .karlo.masterdata.v1.CatalogKindR\x04kind\x12\x12\n" +
+	"\x04kind\x18\x02 \x01(\x0e2 .karlo.masterdata.v1.CatalogKindR\x04kind\x12\x1d\n" +
+	"\n" +
+	"company_id\x18\n" +
+	" \x01(\tR\tcompanyId\x12\x12\n" +
 	"\x04code\x18\x03 \x01(\tR\x04code\x12\x12\n" +
 	"\x04name\x18\x04 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x05 \x01(\tR\vdescription\x12\x16\n" +
@@ -1510,29 +1565,37 @@ const file_karlo_masterdata_v1_masterdata_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"]\n" +
+	"updated_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"|\n" +
 	"\x15GetCatalogItemRequest\x124\n" +
 	"\x04kind\x18\x01 \x01(\x0e2 .karlo.masterdata.v1.CatalogKindR\x04kind\x12\x0e\n" +
-	"\x02id\x18\x02 \x01(\tR\x02id\"N\n" +
+	"\x02id\x18\x02 \x01(\tR\x02id\x12\x1d\n" +
+	"\n" +
+	"company_id\x18\x03 \x01(\tR\tcompanyId\"N\n" +
 	"\x16GetCatalogItemResponse\x124\n" +
-	"\x04item\x18\x01 \x01(\v2 .karlo.masterdata.v1.CatalogItemR\x04item\"\x9a\x01\n" +
+	"\x04item\x18\x01 \x01(\v2 .karlo.masterdata.v1.CatalogItemR\x04item\"\xb9\x01\n" +
 	"\x17ListCatalogItemsRequest\x124\n" +
 	"\x04kind\x18\x01 \x01(\x0e2 .karlo.masterdata.v1.CatalogKindR\x04kind\x12,\n" +
 	"\x05query\x18\x02 \x01(\v2\x16.karlo.common.v1.QueryR\x05query\x12\x1b\n" +
-	"\tparent_id\x18\x03 \x01(\tR\bparentId\"\x8a\x01\n" +
+	"\tparent_id\x18\x03 \x01(\tR\bparentId\x12\x1d\n" +
+	"\n" +
+	"company_id\x18\x04 \x01(\tR\tcompanyId\"\x8a\x01\n" +
 	"\x18ListCatalogItemsResponse\x126\n" +
 	"\x05items\x18\x01 \x03(\v2 .karlo.masterdata.v1.CatalogItemR\x05items\x126\n" +
 	"\tpage_info\x18\x02 \x01(\v2\x19.karlo.common.v1.PageInfoR\bpageInfo\"R\n" +
 	"\n" +
 	"CatalogRef\x124\n" +
 	"\x04kind\x18\x01 \x01(\x0e2 .karlo.masterdata.v1.CatalogKindR\x04kind\x12\x0e\n" +
-	"\x02id\x18\x02 \x01(\tR\x02id\"Q\n" +
+	"\x02id\x18\x02 \x01(\tR\x02id\"p\n" +
 	"\x1aResolveCatalogItemsRequest\x123\n" +
-	"\x04refs\x18\x01 \x03(\v2\x1f.karlo.masterdata.v1.CatalogRefR\x04refs\"U\n" +
+	"\x04refs\x18\x01 \x03(\v2\x1f.karlo.masterdata.v1.CatalogRefR\x04refs\x12\x1d\n" +
+	"\n" +
+	"company_id\x18\x02 \x01(\tR\tcompanyId\"U\n" +
 	"\x1bResolveCatalogItemsResponse\x126\n" +
-	"\x05items\x18\x01 \x03(\v2 .karlo.masterdata.v1.CatalogItemR\x05items\"P\n" +
+	"\x05items\x18\x01 \x03(\v2 .karlo.masterdata.v1.CatalogItemR\x05items\"o\n" +
 	"\x19ValidateReferencesRequest\x123\n" +
-	"\x04refs\x18\x01 \x03(\v2\x1f.karlo.masterdata.v1.CatalogRefR\x04refs\"m\n" +
+	"\x04refs\x18\x01 \x03(\v2\x1f.karlo.masterdata.v1.CatalogRefR\x04refs\x12\x1d\n" +
+	"\n" +
+	"company_id\x18\x02 \x01(\tR\tcompanyId\"m\n" +
 	"\x1aValidateReferencesResponse\x12\x14\n" +
 	"\x05valid\x18\x01 \x01(\bR\x05valid\x129\n" +
 	"\ainvalid\x18\x02 \x03(\v2\x1f.karlo.masterdata.v1.CatalogRefR\ainvalid\"\x89\x05\n" +

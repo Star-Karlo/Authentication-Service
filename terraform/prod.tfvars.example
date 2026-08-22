@@ -1,0 +1,43 @@
+# Authentication service, production.
+#
+# Apply platform-terraform first: this reads its outputs by remote state.
+
+environment          = "prod"
+cors_allowed_origins = ["https://app.karlo.co.id"]
+fluentd_host         = "fluentd.karlo.internal"
+
+# The authentication service is on the path of every request in both products,
+# so it gets a larger baseline than the others and never runs as a single task.
+task_cpu      = 512
+task_memory   = 1024
+desired_count = 2
+min_capacity  = 2
+max_capacity  = 6
+
+extra_environment = [
+  { name = "DB_NAME", value = "karlo_auth" },
+  { name = "DB_SSLMODE", value = "require" },
+  { name = "ACCESS_TOKEN_TTL", value = "15m" },
+  { name = "REFRESH_TOKEN_TTL", value = "720h" },
+  { name = "BCRYPT_COST", value = "12" },
+  { name = "LOGIN_RATE_LIMIT", value = "5" },
+  { name = "LOGIN_RATE_WINDOW", value = "15m" },
+]
+
+# This service is the only holder of the JWT private key. No other service is
+# granted it.
+secrets = [
+  { name = "DB_HOST", valueFrom = "SECRET_RDS:host::" },
+  { name = "DB_USER", valueFrom = "SECRET_RDS:username::" },
+  { name = "DB_PASSWORD", valueFrom = "SECRET_RDS:password::" },
+  { name = "JWT_PRIVATE_KEY", valueFrom = "SECRET_JWT_PRIVATE" },
+  { name = "JWT_PUBLIC_KEY", valueFrom = "SECRET_JWT_PUBLIC" },
+  { name = "SERVICE_TOKEN", valueFrom = "SECRET_TOKENS:authentication-service::" },
+  { name = "ACCEPTED_SERVICE_TOKENS", valueFrom = "SECRET_TOKENS:all::" },
+]
+
+secret_arns = ["SECRET_RDS", "SECRET_JWT_PRIVATE", "SECRET_JWT_PUBLIC", "SECRET_TOKENS"]
+
+# The SECRET_* placeholders are Secrets Manager ARNs from platform-terraform's
+# `secret_arns` output. Copy this file to prod.tfvars and substitute them; the
+# copy is gitignored because the ARNs name where production credentials live.

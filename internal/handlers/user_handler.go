@@ -179,14 +179,25 @@ func (h *UserHandler) SetPermission(c *gin.Context) {
 	}
 
 	var body struct {
-		Permission models.Permission `json:"permission" binding:"required"`
+		// The product this grant applies to. Required and explicit: a person may
+		// hold different roles and permissions in TMS and FMS, so a grant that
+		// did not say which would be ambiguous.
+		Product string `json:"product" binding:"required"`
+		// Permission keys from that product's catalogue, e.g. "order.read".
+		Permissions []string `json:"permissions" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
 
-	if err := h.users.SetPermission(c.Request.Context(), actorID, targetID, body.Permission); err != nil {
+	product := authctx.Product(body.Product)
+	if len(authctx.CatalogFor(product)) == 0 {
+		response.BadRequest(c, "Unknown product: "+body.Product)
+		return
+	}
+
+	if err := h.users.SetPermission(c.Request.Context(), actorID, targetID, product, body.Permissions); err != nil {
 		writeServiceError(c, err)
 		return
 	}

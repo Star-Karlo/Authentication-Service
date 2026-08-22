@@ -123,6 +123,18 @@ type Company struct {
 	IsVerified  bool `gorm:"not null;default:false" json:"isVerified"`
 	IsSuspended bool `gorm:"not null;default:false" json:"isSuspended"`
 
+	// FMSTenantID is this company's FMS-facing alias.
+	//
+	// FMS identifies a tenant by a bigint and its row-level security compares
+	// against it on every query across live customer data. Recording the alias
+	// here means neither product translates at runtime: the token carries both,
+	// FMS reads this, TMS reads the UUID. One concept, one primary key, one
+	// recorded alias for a system that predates the shared IAM — the same shape
+	// as the legacy_id columns carried for the Mongo migration.
+	//
+	// Nil for a company that has never used FMS.
+	FMSTenantID *int64 `gorm:"column:fms_tenant_id;uniqueIndex" json:"fmsTenantId,omitempty"`
+
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 	CreatedAt time.Time      `json:"createdAt"`
 	UpdatedAt time.Time      `json:"updatedAt"`
@@ -146,10 +158,22 @@ type User struct {
 	PasswordHash string  `gorm:"column:password_hash;not null" json:"-"`
 	FullName     *string `json:"fullName,omitempty"`
 
-	Role        string `gorm:"not null" json:"role"`
-	AccountType string `gorm:"not null;default:subAccount" json:"accountType"`
+	// Role and Permission are DEPRECATED, superseded by user_product_access.
+	// They are retained so a deploy that has to be reverted still finds the
+	// data; the application no longer reads them.
+	Role       string     `gorm:"not null" json:"-"`
+	Permission Permission `gorm:"type:jsonb" json:"-"`
 
-	Permission Permission `gorm:"type:jsonb" json:"permission,omitempty"`
+	// IsPlatformStaff marks a Karlo employee, who administers across tenants
+	// and bypasses company entitlement in both products.
+	//
+	// Product-neutral by design: FMS calls this platform_admin and TMS called
+	// it superadmin/admin, but a Karlo employee is staff across both products
+	// rather than an administrator of one, so it does not belong in a
+	// per-product table.
+	IsPlatformStaff bool `gorm:"not null;default:false" json:"isPlatformStaff"`
+
+	AccountType string `gorm:"not null;default:subAccount" json:"accountType"`
 
 	BirthDate *time.Time `gorm:"type:date" json:"birthDate,omitempty"`
 	Address   *string    `json:"address,omitempty"`
@@ -430,3 +454,108 @@ func parsePGArray(s string) ([]string, error) {
 	}
 	return append(out, string(cur)), nil
 }
+
+// CompanyModule is one company's entitlement to one module.
+//
+// This is the first of the two tiers governing access. It answers "may this
+// company use accounting at all", independently of what any individual user's
+// permission map says. See platform/authctx for how the two combine.
+type CompanyModule struct {
+	CompanyID uuid.UUID `gorm:"type:uuid;primaryKey" json:"companyId"`
+	Module    string    `gorm:"primaryKey" json:"module"`
+
+	// Enabled false is not the same as an absent row: it records that the
+	// company once held the module, which matters when reinstating it and when
+	// answering a support ticket about access that used to work.
+	Enabled bool `gorm:"not null;default:true" json:"enabled"`
+
+	ValidFrom  *time.Time `gorm:"type:date" json:"validFrom,omitempty"`
+	ValidUntil *time.Time `gorm:"type:date" json:"validUntil,omitempty"`
+
+	// Limits holds per-module quotas: seats, monthly volume, and so on.
+	Limits JSONMap `gorm:"type:jsonb" json:"limits,omitempty"`
+
+	GrantedByUserID *uuid.UUID `gorm:"type:uuid" json:"grantedByUserId,omitempty"`
+	Note            *string    `json:"note,omitempty"`
+
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+func (CompanyModule) TableName() string { return "company_modules" }
+
+// IsActive reports whether the entitlement is in force at the given moment.
+//
+// Three things can put it out of force: being disabled, not having started, or
+// having expired. A trial that ended yesterday is a row that still exists and
+// still says which module it was for, but it grants nothing today.
+func (m *CompanyModule) IsActive(at time.Time) bool {
+	if !m.Enabled {
+		return false
+	}
+	if m.ValidFrom != nil && at.Before(*m.ValidFrom) {
+		return false
+	}
+	if m.ValidUntil != nil {
+		// Dates are inclusive: an entitlement valid until the 31st still works
+		// on the 31st.
+		endOfDay := m.ValidUntil.Add(24*time.Hour - time.Nanosecond)
+		if at.After(endOfDay) {
+			return false
+		}
+	}
+	return true
+}
+
+// CompanyModuleEvent records a change to an entitlement.
+//
+// Entitlement changes are commercial events: they decide what a customer can do
+// and, indirectly, what they are billed. They are recorded rather than inferred
+// from the current state.
+type CompanyModuleEvent struct {
+	ID          int64      `gorm:"primaryKey" json:"id"`
+	CompanyID   uuid.UUID  `gorm:"type:uuid;not null" json:"companyId"`
+	Module      string     `gorm:"not null" json:"module"`
+	Action      string     `gorm:"not null" json:"action"`
+	ActorUserID *uuid.UUID `gorm:"type:uuid" json:"actorUserId,omitempty"`
+	Detail      JSONMap    `gorm:"type:jsonb" json:"detail,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
+}
+
+func (CompanyModuleEvent) TableName() string { return "company_module_history" }
+
+// Entitlement change actions.
+const (
+	ModuleGranted = "granted"
+	ModuleRevoked = "revoked"
+	ModuleUpdated = "updated"
+)
+
+// ProductAccess is one person's access to one product.
+//
+// Role and permissions live here rather than on the user because the two
+// products share no vocabulary: TMS roles are job personas (shipper, driver),
+// FMS roles are privilege tiers (operator, manager, admin). A single column
+// would mean every consumer interpreting a value it cannot validate.
+//
+// No row means no access to that product, which is the common case — a TMS
+// driver has a tms row and no fms row.
+type ProductAccess struct {
+	UserID  uuid.UUID `gorm:"type:uuid;primaryKey" json:"userId"`
+	Product string    `gorm:"primaryKey" json:"product"`
+
+	Role string `gorm:"not null" json:"role"`
+
+	// Permissions are granted keys from the product's catalogue, flat rather
+	// than nested. This is the shape FMS already uses in production, and the
+	// nested form carried no information this does not.
+	Permissions StringArray `gorm:"type:text[]" json:"permissions"`
+
+	Enabled         bool       `gorm:"not null;default:true" json:"enabled"`
+	GrantedByUserID *uuid.UUID `gorm:"type:uuid" json:"grantedByUserId,omitempty"`
+
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+func (ProductAccess) TableName() string { return "user_product_access" }

@@ -2,7 +2,8 @@
 
 **HTTP** `:5001` · **gRPC** `:6001` · **Store** PostgreSQL
 
-Identity, company membership, sessions, permissions and API keys.
+Identity, company membership, sessions, module entitlement, permissions and API
+keys.
 
 **This service is the authority on who a caller is.** It holds the RS256 private
 key and is the only party that can mint a token; every other service holds only
@@ -16,7 +17,7 @@ It depends on nothing. Every other service depends on it.
 ```bash
 cp .env.example .env          # set DB_PASSWORD, SERVICE_TOKEN, ACCEPTED_SERVICE_TOKENS
 make keys                     # development RSA signing pair, written to .keys/ (gitignored)
-make migrate-up               # apply the schema
+make migrate-up               # apply the schema (000001 init, 000002 company modules)
 make run
 ```
 
@@ -29,6 +30,30 @@ Other services need the **public** key from `.keys/jwt-public.pem`; point their
 - **Refresh tokens rotate.** The old one stops working the moment a new pair is issued, so a stolen token is usable at most once.
 - **A password change, a permission change or a suspension revokes sessions.** The permission map is embedded in issued tokens, so a change only takes effect once those are gone.
 - **API keys replace the ten hardcoded tokens** the monolith compiled into its constants file. Stored hashed, scoped, and expirable.
+- **Login rate limiting is a fixed window in Redis**, keyed by a fingerprint of the identifier so no email address sits in the keyspace. With no Redis it falls back to counting audit rows rather than refusing every login.
+
+## Access is two tiers
+
+`company_modules` records what a **company** is entitled to; `users.permission`
+records what a **person** may do within that. Effective access is the
+intersection, and it is evaluated by one shared function
+([`internal/platform/authctx/claims.go`](internal/platform/authctx/claims.go))
+against a catalogue of modules and actions
+([`modules.go`](internal/platform/authctx/modules.go)).
+
+The company's active modules are read at token mint time and embedded in the
+token, so every service applies the first tier locally with no round trip. **If
+that lookup fails the token is minted with no modules**, not all of them: the
+holder authenticates but reaches nothing, and a refresh fixes it. Failing the
+other way would hand out a token granting everything until it expired.
+
+Two consequences worth knowing before reading the code:
+
+- **A root account no longer bypasses module checks.** It is unrestricted only *within* its company's entitlement.
+- **An administrator cannot grant a module the company does not hold.** `SetPermission` refuses it, and the permission editor renders exactly the entitlement, so there is nothing to tick.
+
+`superadmin` and `admin` are Karlo staff, not tenants, and no company's
+entitlement applies to them.
 
 
 ## Layout

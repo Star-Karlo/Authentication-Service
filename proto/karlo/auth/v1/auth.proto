@@ -42,13 +42,46 @@ service AuthService {
   rpc ResolveDeliveryTargets(ResolveDeliveryTargetsRequest) returns (ResolveDeliveryTargetsResponse);
 }
 
+// ProductAccess is one person's access to one product.
+//
+// A product absent from a user's access map is a product they cannot use at
+// all, which is the common case rather than an edge one: a TMS driver has a tms
+// entry and no fms entry.
+message ProductAccess {
+  // The tenant role, in that product's own vocabulary. TMS uses job personas
+  // (shipper, transporter, driver); FMS uses privilege tiers (operator,
+  // manager, admin). Neither has to accommodate the other.
+  string role = 1;
+  // Granted permission keys from the product's catalogue, e.g. "order.read".
+  repeated string permissions = 2;
+  // The COMPANY's entitlement for this product. The user's permissions can only
+  // ever narrow it.
+  repeated string features = 3;
+}
+
 message User {
   string id = 1;
   string username = 2;
   string email = 3;
   string phone = 4;
   string full_name = 5;
-  string role = 6;
+  // DEPRECATED: superseded by access. Retained so a caller mid-migration still
+  // compiles; it carries the TMS role only.
+  string role = 6 [deprecated = true];
+
+  // access holds this person's access per product, keyed by product ("tms",
+  // "fms"). This is the authoritative field.
+  map<string, ProductAccess> access = 20;
+
+  // is_platform_staff marks a Karlo employee, who administers across tenants
+  // and bypasses company entitlement in both products. Product-neutral: a Karlo
+  // employee is staff across both, not an administrator of one.
+  bool is_platform_staff = 21;
+
+  // fms_tenant_id is the company's FMS-facing alias, carried so FMS reads its
+  // bigint tenant id directly rather than translating the company UUID on every
+  // request.
+  int64 fms_tenant_id = 22;
   // account_type is "mainAccount" for a company root account, "subAccount" for
   // a member created by a parent.
   string account_type = 7;
