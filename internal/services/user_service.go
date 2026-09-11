@@ -64,6 +64,9 @@ type RegisterInput struct {
 	RoleID *uuid.UUID
 	// CompanyName creates a new company alongside the administrator account.
 	CompanyName string
+	// CompanyAbbreviation, optional. Uppercased and trimmed; the agreement
+	// numbering reads it verbatim.
+	CompanyAbbreviation string
 
 	// Permissions are the keys a member is granted at creation. Empty for a
 	// root account, which is unrestricted within its company's entitlement.
@@ -125,8 +128,9 @@ func (s *UserService) Register(ctx context.Context, in RegisterInput) (*models.U
 		// A registration with no parent and no company creates a new tenant.
 		if newTenant {
 			company := &models.Company{
-				Name: firstNonEmpty(in.CompanyName, in.FullName, in.Email),
-				Role: in.Role,
+				Name:         firstNonEmpty(in.CompanyName, in.FullName, in.Email),
+				Role:         in.Role,
+				Abbreviation: abbreviationOrNil(in.CompanyAbbreviation),
 				Settings: models.CompanySettings{
 					PPNPercentage:   0.02,
 					PPH23Percentage: 0.11,
@@ -827,4 +831,13 @@ func (s *UserService) AssignRole(ctx context.Context, actorID, targetID, roleID 
 		Detail: models.JSONMap{"roleId": roleID.String()},
 	})
 	return nil
+}
+
+// abbreviationOrNil normalises a company abbreviation, or leaves it unset.
+func abbreviationOrNil(s string) *string {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	if s == "" {
+		return nil
+	}
+	return &s
 }

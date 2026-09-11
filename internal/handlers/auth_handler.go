@@ -135,6 +135,10 @@ type registerRequest struct {
 	FullName    string `json:"fullName"`
 	Role        string `json:"role" binding:"required"`
 	CompanyName string `json:"companyName"`
+	// CompanyAbbreviation goes into every agreement number this company is
+	// party to (AGR-KP-MAS-000101), so it belongs on the company from the
+	// moment it exists — not bolted on later by somebody who has to remember.
+	CompanyAbbreviation string `json:"companyAbbreviation"`
 }
 
 // Register creates a new root account and its company.
@@ -154,13 +158,14 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 
 	user, err := h.users.Register(c.Request.Context(), services.RegisterInput{
-		Username:    req.Username,
-		Email:       req.Email,
-		Phone:       req.Phone,
-		Password:    req.Password,
-		FullName:    req.FullName,
-		Role:        req.Role,
-		CompanyName: req.CompanyName,
+		Username:            req.Username,
+		Email:               req.Email,
+		Phone:               req.Phone,
+		Password:            req.Password,
+		FullName:            req.FullName,
+		Role:                req.Role,
+		CompanyName:         req.CompanyName,
+		CompanyAbbreviation: req.CompanyAbbreviation,
 	})
 	if err != nil {
 		response.BadRequest(c, err.Error())
