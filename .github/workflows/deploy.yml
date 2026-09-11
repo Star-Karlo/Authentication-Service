@@ -82,12 +82,45 @@ jobs:
           container-name: ${{ env.CONTAINER_NAME }}
           image: ${{ steps.build.outputs.image }}
 
-      - name: Deploy and wait for the rollout
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.render.outputs.task-definition }}
-          service: ${{ env.SERVICE_NAME }}
-          cluster: ${{ env.ECS_CLUSTER }}
+      # Register first, so the migration runs the image just built — the
+      # one whose migrations match its code. The deploy action would register
+      # and roll in one step, which is the wrong order here.
+      - name: Register the task definition
+        id: register
+        run: |
+          ARN=$(aws ecs register-task-definition \
+                --cli-input-json file://${{ steps.render.outputs.task-definition }} \
+                --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "arn=$ARN" >> "$GITHUB_OUTPUT"
+          echo "registered $ARN"
+
+      # Migrate BEFORE rolling the service, as a one-off task inside the VPC
+      # with the service's own secrets — the only place RDS is reachable from.
+      # On a fresh environment it also creates the database. A failed
+      # migration stops the deploy here, so the running service never sees a
+      # schema its code was not built for.
+      - name: Run migrations
+        run: |
+          NET=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$SERVICE_NAME" \
+                --query 'services[0].networkConfiguration.awsvpcConfiguration' --output json)
+          TASK=$(aws ecs run-task --cluster "$ECS_CLUSTER" --launch-type FARGATE \
+                --task-definition "${{ steps.register.outputs.arn }}" \
+                --network-configuration "{\"awsvpcConfiguration\":$NET}" \
+                --overrides "{\"containerOverrides\":[{\"name\":\"$CONTAINER_NAME\",\"command\":[\"server\",\"migrate\"]}]}" \
+                --query 'tasks[0].taskArn' --output text)
+          echo "migration task: $TASK"
+          aws ecs wait tasks-stopped --cluster "$ECS_CLUSTER" --tasks "$TASK"
+          CODE=$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$TASK" \
+                --query 'tasks[0].containers[0].exitCode' --output text)
+          REASON=$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$TASK" \
+                --query 'tasks[0].stoppedReason' --output text)
+          echo "exit code: $CODE  ($REASON)"
+          [ "$CODE" = "0" ]
+
+      - name: Roll the service and wait for stability
+        run: |
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$SERVICE_NAME" \
+                --task-definition "${{ steps.register.outputs.arn }}" --query 'service.serviceName' --output text
           # Fails the job if the new tasks never become healthy, which is what
           # makes a bad deploy visible on the commit rather than in a dashboard.
-          wait-for-service-stability: true
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$SERVICE_NAME"
