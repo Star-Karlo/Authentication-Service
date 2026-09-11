@@ -162,15 +162,24 @@ resource "aws_lb_target_group" "main" {
   tags = { Name = local.name }
 }
 
-# One rule per five paths. An ALB rule accepts at most five condition values,
-# and this service claims more than that; a single rule fails validation.
-# Priorities are consecutive from listener_priority, which is why the
-# services' priorities are spaced a hundred apart.
+# One rule per five paths, on EACH listener.
+#
+# An ALB rule accepts at most five condition values, so the paths are chunked.
+# And a rule belongs to one listener: 443 serves a browser that reaches the
+# ALB directly, 80 serves CloudFront, and a rule on one does nothing for the
+# other. Priorities are per-listener, so the same numbers are reused on both.
 resource "aws_lb_listener_rule" "main" {
-  for_each = { for i, chunk in chunklist(var.path_patterns, 5) : i => chunk }
+  for_each = {
+    for pair in setproduct(keys(local.platform.alb_listener_arns), range(length(chunklist(var.path_patterns, 5)))) :
+    "${pair[0]}-${pair[1]}" => {
+      listener = local.platform.alb_listener_arns[pair[0]]
+      index    = pair[1]
+      values   = chunklist(var.path_patterns, 5)[pair[1]]
+    }
+  }
 
-  listener_arn = local.platform.alb_https_listener_arn
-  priority     = var.listener_priority + each.key
+  listener_arn = each.value.listener
+  priority     = var.listener_priority + each.value.index
 
   action {
     type             = "forward"
@@ -179,7 +188,7 @@ resource "aws_lb_listener_rule" "main" {
 
   condition {
     path_pattern {
-      values = each.value
+      values = each.value.values
     }
   }
 
