@@ -29,8 +29,17 @@ type Deps struct {
 	Verifier *authctx.Verifier
 	Remote   authctx.RemoteValidator
 
-	Auth *handlers.AuthHandler
-	User *handlers.UserHandler
+	// Revocations lets a locally-verified token be refused before it expires.
+	Revocations authctx.RevocationChecker
+
+	Catalog     *handlers.CatalogHandler
+	Shippers    *handlers.ShipperHandler
+	Merges      *handlers.MergeHandler
+	Auth        *handlers.AuthHandler
+	User        *handlers.UserHandler
+	Entitlement *handlers.EntitlementHandler
+	Companies   *handlers.CompanyHandler
+	Roles       *handlers.RoleHandler
 }
 
 // Setup builds the gin engine.
@@ -79,6 +88,16 @@ func Setup(d Deps) *gin.Engine {
 }
 
 func registerPublic(api *gin.RouterGroup, d Deps) {
+	// The claim pages are PUBLIC by necessity: whoever opens the link has no
+	// Karlo account yet, so there is no token they could present. The link
+	// itself is the credential — holding it is what proves it was given to
+	// them — which is why it is hashed at rest and single-use.
+	claim := api.Group("/claim")
+	{
+		claim.GET("/:token", d.Shippers.PreviewClaim)
+		claim.POST("/:token", d.Shippers.Claim)
+	}
+
 	auth := api.Group("/auth")
 
 	auth.POST("/login", d.Auth.Login)
@@ -89,7 +108,7 @@ func registerPublic(api *gin.RouterGroup, d Deps) {
 
 func registerProtected(api *gin.RouterGroup, d Deps) {
 	protected := api.Group("")
-	protected.Use(authctx.RequireAuth(d.Verifier, d.Remote))
+	protected.Use(authctx.RequireAuthWithRevocations(d.Verifier, d.Remote, d.Revocations))
 
 	// Self-service.
 	auth := protected.Group("/auth")
@@ -100,20 +119,120 @@ func registerProtected(api *gin.RouterGroup, d Deps) {
 	auth.POST("/register-member", authctx.RequireModule("collaboration.inviteMember"), d.Auth.RegisterMember)
 
 	// User administration.
+	// The permission catalogue. Readable by anyone signed in, because a role
+	// editor needs it and the list of keys the system defines is not itself
+	// sensitive — what somebody HOLDS is, and that is elsewhere.
+	// A company's own roles. Gated on the same permission as inviting members:
+	// deciding what a colleague may do and deciding who the colleagues are is
+	// the same job, held by the same person.
+	roles := protected.Group("/roles")
+	roles.Use(authctx.RequireModule("collaboration.manageMember"))
+	{
+		roles.GET("", d.Roles.List)
+		roles.POST("", d.Roles.Create)
+		roles.PUT("/:id", d.Roles.Update)
+		roles.DELETE("/:id", d.Roles.Delete)
+	}
+
+	catalog := protected.Group("/permissions/catalog")
+	{
+		catalog.GET("", d.Catalog.List)
+
+		// Rewording is an administrative act: it changes what every user of
+		// this deployment reads on the permission screen.
+		catalog.PUT("/:key/label",
+			authctx.RequireModule("collaboration.inviteMember"),
+			d.Catalog.SetLabel)
+	}
+
+	shippers := protected.Group("/shippers")
+	{
+		shippers.GET("", d.Shippers.List)
+		shippers.POST("", authctx.RequireModule("collaboration.inviteMember"), d.Shippers.Create)
+		// Issuing a link hands somebody administrator access to a company, so
+		// it takes the same permission as inviting a member — which is what it
+		// is, for a company that does not exist yet.
+		shippers.POST("/:id/claim-link",
+			authctx.RequireModule("collaboration.inviteMember"), d.Shippers.IssueClaimLink)
+	}
+
+	// Merging moves records between tenants, so it is platform staff only.
+	companies := protected.Group("/companies")
+	companies.Use(authctx.RequirePlatformStaff())
+	{
+		companies.POST("/:id/merge", d.Merges.Merge)
+	}
+
 	users := protected.Group("/users")
 	users.GET("", d.User.List)
 	users.GET("/:id", d.User.Get)
 	users.PUT("/me", d.User.UpdateMe)
 
-	admin := users.Group("")
-	admin.Use(authctx.RequireRole("superadmin", "admin"))
-	admin.PUT("/:id", d.User.Update)
-	admin.PUT("/:id/suspend", d.User.Suspend)
-	admin.DELETE("/:id", d.User.Delete)
+	// Managing a company's own people is the company's job, not Karlo's.
+	//
+	// These were guarded by RequireRole("superadmin","admin"). Migration
+	// 000003 moved both of those to is_platform_staff, so no tenant role
+	// satisfied the guard any longer and a company administrator could invite a
+	// member and set their permissions but never suspend or remove one — the
+	// customer had to raise a support ticket to take away a departing
+	// employee's access, which is the worst possible thing to make slow.
+	//
+	// The permission keys express the intent directly, and the service layer
+	// still confirms that actor and target share a company, so a key alone does
+	// not let anyone reach into another tenant.
+	users.PUT("/:id", authctx.RequireModule("collaboration.manageMember"), d.User.Update)
+	users.PUT("/:id/suspend", authctx.RequireModule("collaboration.removeMember"), d.User.Suspend)
+	users.DELETE("/:id", authctx.RequireModule("collaboration.removeMember"), d.User.Delete)
 
 	// Permission management is a company-owner action, not a platform-admin one.
+	// Which role a colleague holds. Separate from the generic user update
+	// because the role must be checked against the target's company — the ids
+	// are opaque, so a pasted id from another company would look fine.
+	users.PUT("/:id/role",
+		authctx.RequireModule("collaboration.manageMember"), d.User.AssignRole)
+
 	users.PUT("/:id/permission",
 		authctx.RequireModule("collaboration.manageMember"),
 		d.User.SetPermission,
 	)
+
+	// Which PRODUCTS a member may use, as opposed to what they may do inside
+	// one. Without this a company could not put its own people on a second
+	// product it had bought.
+	users.GET("/:id/access", authctx.RequireModule("collaboration.read"), d.User.ListAccess)
+	users.PUT("/:id/access", authctx.RequireModule("collaboration.manageMember"), d.User.SetAccess)
+	users.DELETE("/:id/access/:product",
+		authctx.RequireModule("collaboration.manageMember"), d.User.RevokeAccess)
+
+	registerAdmin(protected, d)
+}
+
+// registerAdmin mounts the Karlo staff surface: deciding what a company has
+// bought.
+//
+// Guarded by RequirePlatformStaff rather than by a permission key, deliberately.
+// A permission key is something a company can hold, and no arrangement of keys
+// should ever let a customer widen their own entitlement — that decision is
+// ours to make and theirs to pay for. The guard is the one check in the system
+// that a tenant cannot satisfy at all.
+func registerAdmin(protected *gin.RouterGroup, d Deps) {
+	if d.Entitlement == nil {
+		return
+	}
+
+	admin := protected.Group("/admin")
+	admin.Use(authctx.RequirePlatformStaff())
+
+	admin.GET("/features", d.Entitlement.Catalogue)
+
+	// The platform-wide company directory. Registered before the
+	// /companies/:id/entitlements group below so "companies" alone resolves
+	// here rather than being read as a missing id.
+	admin.GET("/companies", d.Companies.List)
+
+	companies := admin.Group("/companies/:id/entitlements")
+	companies.GET("", d.Entitlement.List)
+	companies.PUT("", d.Entitlement.Grant)
+	companies.GET("/history", d.Entitlement.History)
+	companies.DELETE("/:product/:module", d.Entitlement.Revoke)
 }

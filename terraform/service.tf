@@ -98,9 +98,12 @@ resource "aws_ecs_service" "main" {
   launch_type     = "FARGATE"
 
   network_configuration {
-    subnets          = local.platform.private_subnet_ids
+    # Public subnets with a public IP remove the need for a NAT gateway. The
+    # tasks are still not reachable: the security group admits traffic only
+    # from the load balancer. See tasks_in_public_subnets in the platform.
+    subnets          = var.tasks_in_public_subnets ? local.platform.public_subnet_ids : local.platform.private_subnet_ids
     security_groups  = [local.platform.tasks_security_group_id]
-    assign_public_ip = false
+    assign_public_ip = var.tasks_in_public_subnets
   }
 
   load_balancer {

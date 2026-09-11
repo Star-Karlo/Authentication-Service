@@ -22,6 +22,15 @@ type ProductAccess struct {
 	// Features is the COMPANY's entitlement for this product. The user's
 	// permissions can only ever narrow it.
 	Features []string `json:"feats,omitempty"`
+
+	// GrantsAll marks an administrator role: everything the company is
+	// entitled to, without enumerating it.
+	//
+	// This replaces the old Root flag, which was a property of the ACCOUNT —
+	// one privileged user per company. Access is a property of the ROLE now, so
+	// a company may have two administrators, or none, and an administrator who
+	// leaves does not strand the company.
+	GrantsAll bool `json:"all,omitempty"`
 }
 
 // HasPermission reports whether a principal may perform an action in a product.
@@ -29,7 +38,8 @@ type ProductAccess struct {
 // Three conditions, and all three must hold:
 //
 //  1. The person has access to the product at all.
-//  2. The permission is granted to them.
+//  2. The permission is granted to them — or their role grants everything,
+//     which is what an administrator role means.
 //  3. The company holds the entitlement that gates it — where the gate is read
 //     from the catalogue, NOT derived from the key. `fuel.view` is gated by
 //     `live`; splitting the key on its dot would gate it against a `fuel`
@@ -49,7 +59,11 @@ func (p Principal) HasPermission(product Product, key string) bool {
 		return false
 	}
 
-	if !slices.Contains(access.Permissions, key) {
+	// An administrator role holds every key its company is entitled to, so the
+	// permission list is not consulted for it. The entitlement check below
+	// still is: "everything the company bought" is a narrower claim than the
+	// staff bypass above, and the difference is the point.
+	if !access.GrantsAll && !slices.Contains(access.Permissions, key) {
 		return false
 	}
 

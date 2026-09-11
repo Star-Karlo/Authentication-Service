@@ -14,24 +14,50 @@ var testFields = FieldSet{
 // convenience one. A field name that reaches an ORDER BY or a Mongo filter key
 // unchecked lets a caller sort by a column they cannot read, probe fields that
 // are not part of the API, or inject SQL.
+//
+// A disallowed field REFUSES the whole request rather than being dropped from
+// it. Dropping is the tempting behaviour and it is wrong twice over: the caller
+// asked to narrow a list and silently got the unnarrowed one, which reads as a
+// filter that does not work; and a probe for `password_hash` returns 200,
+// telling the prober only that nothing happened rather than that the field is
+// not addressable.
 func TestParseRejectsFieldsOutsideTheAllowlist(t *testing.T) {
 	p := Parse("0", "20",
 		`[{"id":"password_hash","value":"x"},{"id":"orderNumber","value":"ORD-1"}]`,
-		`[{"id":"secret_column","desc":true},{"id":"createdAt","desc":true}]`,
+		"", "", testFields)
+
+	if p.Err == nil {
+		t.Fatalf("a disallowed filter field was accepted: %+v", p.Filters)
+	}
+	if len(p.Filters) != 0 {
+		t.Errorf("a refused request should carry no filters, got %+v", p.Filters)
+	}
+
+	// The same rule on the sort side, checked separately: they are parsed by
+	// different functions and one has been fixed without the other before.
+	p = Parse("0", "20", "", `[{"id":"secret_column","desc":true}]`, "", testFields)
+	if p.Err == nil {
+		t.Fatalf("a disallowed sort field was accepted: %+v", p.Sorts)
+	}
+}
+
+// The allowlisted names still resolve to their columns, which is the other half
+// of the contract — a rule that refused everything would also pass the test
+// above.
+func TestParseMapsAllowlistedFieldsToColumns(t *testing.T) {
+	p := Parse("0", "20",
+		`[{"id":"orderNumber","value":"ORD-1"}]`,
+		`[{"id":"createdAt","desc":true}]`,
 		"", testFields)
 
-	if len(p.Filters) != 1 {
-		t.Fatalf("expected exactly the allowlisted filter, got %+v", p.Filters)
+	if p.Err != nil {
+		t.Fatalf("an allowlisted request was refused: %v", p.Err)
 	}
-	if p.Filters[0].Field != "order_number" {
-		t.Errorf("filter field = %q, want the mapped column", p.Filters[0].Field)
+	if len(p.Filters) != 1 || p.Filters[0].Field != "order_number" {
+		t.Errorf("filters = %+v, want one on order_number", p.Filters)
 	}
-
-	if len(p.Sorts) != 1 {
-		t.Fatalf("expected exactly the allowlisted sort, got %+v", p.Sorts)
-	}
-	if p.Sorts[0].Field != "created_at" {
-		t.Errorf("sort field = %q, want the mapped column", p.Sorts[0].Field)
+	if len(p.Sorts) != 1 || p.Sorts[0].Field != "created_at" {
+		t.Errorf("sorts = %+v, want one on created_at", p.Sorts)
 	}
 }
 
@@ -174,13 +200,29 @@ func TestOperatorNormalisation(t *testing.T) {
 		"lt":       OpLt,
 		"lte":      OpLte,
 		"between":  OpBetween,
-		"nonsense": OpEq,
+
+		// Spellings clients actually send meaning "contains". They were
+		// becoming equality, so a text search returned zero rows and read as
+		// "no data".
+		"regex": OpLike,
+		"match": OpLike,
 	}
 
 	for in, want := range cases {
 		if got := normaliseOperator(in); got != want {
 			t.Errorf("normaliseOperator(%q) = %q, want %q", in, got, want)
 		}
+	}
+
+	// An operator the server does not implement is marked unknown so
+	// parseFilters can refuse it. Mapping it to equality — the old behaviour —
+	// returned zero rows and looked like an empty result set rather than a bad
+	// request.
+	if got := normaliseOperator("nonsense"); got != opUnknown {
+		t.Errorf("normaliseOperator(\"nonsense\") = %q, want it marked unknown", got)
+	}
+	if p := Parse("0", "20", `[{"id":"orderNumber","value":"x","operator":"nonsense"}]`, "", "", testFields); p.Err == nil {
+		t.Error("a filter with an unimplemented operator should be refused, not treated as equality")
 	}
 }
 

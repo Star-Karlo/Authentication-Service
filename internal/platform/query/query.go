@@ -11,6 +11,8 @@ package query
 
 import (
 	"encoding/json"
+	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -30,6 +32,10 @@ type Filter struct {
 	Field    string
 	Value    string
 	Operator Operator
+
+	// Values carries every value for an operator that takes a list. Value
+	// holds the first, so a caller that only understands scalars still works.
+	Values []string
 }
 
 // Operator enumerates the comparisons a filter may use.
@@ -55,6 +61,12 @@ type Sort struct {
 
 // Params is the normalised listing request.
 type Params struct {
+	// Err is set when the request could not be understood — an unknown filter
+	// field, a malformed list. Handlers must check it and answer 400: a filter
+	// that is quietly ignored turns a filtered list into an unfiltered one,
+	// which returns 200 with real rows and only the wrong count.
+	Err error
+
 	Page     int
 	PageSize int
 	Filters  []Filter
@@ -101,11 +113,32 @@ func Parse(pageStr, pageSizeStr, filteredJSON, sortedJSON, search string, allowe
 		pageSize = MaxPageSize
 	}
 
+	filters, err := parseFilters(filteredJSON, allowed)
+	if err != nil {
+		// Recorded rather than returned, so the existing signature holds. The
+		// handler checks Err and answers 400; a caller that forgets still gets
+		// an EMPTY filter list rather than an unfiltered one, which fails
+		// closed — no rows instead of every row.
+		return Params{Page: page, PageSize: pageSize, Err: err,
+			Search: strings.TrimSpace(search)}
+	}
+
+	sorts, err := parseSorts(sortedJSON, allowed)
+	if err != nil {
+		// Refused for the same reason a bad filter is, and it was previously
+		// dropped instead. A caller who asked to sort by a field the server
+		// does not offer got an arbitrary order back with nothing to say so —
+		// which reads as "sorting is broken" rather than "that field is not
+		// sortable", and hides a probe for column names behind a 200.
+		return Params{Page: page, PageSize: pageSize, Err: err,
+			Search: strings.TrimSpace(search)}
+	}
+
 	return Params{
 		Page:     page,
 		PageSize: pageSize,
-		Filters:  parseFilters(filteredJSON, allowed),
-		Sorts:    parseSorts(sortedJSON, allowed),
+		Filters:  filters,
+		Sorts:    sorts,
 		Search:   strings.TrimSpace(search),
 	}
 }
@@ -127,10 +160,99 @@ func (f FieldSet) Resolve(name string) (string, bool) {
 	return col, ok
 }
 
+// Names lists the filterable fields, so an error can say what IS allowed
+// rather than only what is not.
+func (f FieldSet) Names() []string {
+	out := make([]string, 0, len(f))
+	for name := range f {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
 type rawFilter struct {
-	ID       string `json:"id"`
-	Value    string `json:"value"`
-	Operator string `json:"operator"`
+	ID       string      `json:"id"`
+	Value    filterValue `json:"value"`
+	Operator string      `json:"operator"`
+	// Type is the spelling the legacy clients use for the operator. Accepted
+	// alongside `operator` because both are in the wild.
+	Type string `json:"type"`
+}
+
+// filterValue accepts either a scalar or an array.
+//
+// Clients send both, and they used to be handled by neither. A `string` field
+// made `["draft","submitted"]` fail to unmarshal, which aborted the WHOLE
+// filter list and returned every row — a broken filter that looks like a
+// working one whenever the unfiltered result happens to be small. Meanwhile
+// "draft,submitted" parsed fine and became a single value, so `IN
+// ('draft,submitted')` matched nothing and looked like "no data".
+//
+// Both shapes are now understood, and a comma-separated string is split for
+// the operators that take a list.
+type filterValue struct {
+	values []string
+}
+
+func (v *filterValue) UnmarshalJSON(b []byte) error {
+	var single interface{}
+	if err := json.Unmarshal(b, &single); err == nil {
+		switch t := single.(type) {
+		case string:
+			v.values = []string{t}
+			return nil
+		case float64:
+			v.values = []string{strconv.FormatFloat(t, 'f', -1, 64)}
+			return nil
+		case bool:
+			v.values = []string{strconv.FormatBool(t)}
+			return nil
+		case nil:
+			v.values = nil
+			return nil
+		}
+	}
+
+	var list []interface{}
+	if err := json.Unmarshal(b, &list); err != nil {
+		return fmt.Errorf("query: a filter value must be a scalar or an array, got %s", b)
+	}
+	for _, item := range list {
+		switch t := item.(type) {
+		case string:
+			v.values = append(v.values, t)
+		case float64:
+			v.values = append(v.values, strconv.FormatFloat(t, 'f', -1, 64))
+		case bool:
+			v.values = append(v.values, strconv.FormatBool(t))
+		}
+	}
+	return nil
+}
+
+// scalar renders the value for a single-value comparison.
+func (v filterValue) scalar() string {
+	if len(v.values) == 0 {
+		return ""
+	}
+	return v.values[0]
+}
+
+// list renders the value for an operator that takes several, splitting a
+// comma-separated scalar so both client spellings work.
+func (v filterValue) list() []string {
+	if len(v.values) == 1 && strings.Contains(v.values[0], ",") {
+		parts := strings.Split(v.values[0], ",")
+		out := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if trimmed := strings.TrimSpace(p); trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+		return out
+	}
+	return v.values
 }
 
 type rawSort struct {
@@ -138,48 +260,79 @@ type rawSort struct {
 	Desc bool   `json:"desc"`
 }
 
-func parseFilters(raw string, allowed FieldSet) []Filter {
+// parseFilters turns the client's JSON into normalised clauses, returning an
+// error rather than silently dropping what it does not understand.
+//
+// Silently dropping is how a filtered list becomes an unfiltered one: the
+// response is 200, the rows are real, and only the count is wrong. That is far
+// harder to notice than a 400, and it was doing exactly this for every array
+// value and every unknown field.
+func parseFilters(raw string, allowed FieldSet) ([]Filter, error) {
 	if raw == "" {
-		return nil
+		return nil, nil
 	}
 	var items []rawFilter
 	if err := json.Unmarshal([]byte(raw), &items); err != nil {
-		return nil
+		return nil, fmt.Errorf("query: `filtered` is not a valid filter list: %w", err)
 	}
 
 	out := make([]Filter, 0, len(items))
 	for _, it := range items {
 		col, ok := allowed.Resolve(it.ID)
 		if !ok {
-			continue
+			return nil, fmt.Errorf("query: %q cannot be filtered on (allowed: %s)",
+				it.ID, strings.Join(allowed.Names(), ", "))
 		}
+
+		op := normaliseOperator(firstNonEmpty(it.Operator, it.Type))
+		if op == opUnknown {
+			return nil, fmt.Errorf("query: %q is not a filter operator on %q "+
+				"(eq, neq, like, in, gt, gte, lt, lte, between)",
+				firstNonEmpty(it.Operator, it.Type), it.ID)
+		}
+		values := it.Value.list()
+		if op == OpIn && len(values) == 0 {
+			return nil, fmt.Errorf("query: an `in` filter on %q needs at least one value", it.ID)
+		}
+
 		out = append(out, Filter{
 			Field:    col,
-			Value:    it.Value,
-			Operator: normaliseOperator(it.Operator),
+			Value:    it.Value.scalar(),
+			Values:   values,
+			Operator: op,
 		})
 	}
-	return out
+	return out, nil
 }
 
-func parseSorts(raw string, allowed FieldSet) []Sort {
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func parseSorts(raw string, allowed FieldSet) ([]Sort, error) {
 	if raw == "" {
-		return nil
+		return nil, nil
 	}
 	var items []rawSort
 	if err := json.Unmarshal([]byte(raw), &items); err != nil {
-		return nil
+		return nil, fmt.Errorf("query: `sorted` is not a valid sort list: %w", err)
 	}
 
 	out := make([]Sort, 0, len(items))
 	for _, it := range items {
 		col, ok := allowed.Resolve(it.ID)
 		if !ok {
-			continue
+			return nil, fmt.Errorf("query: %q cannot be sorted on (allowed: %s)",
+				it.ID, strings.Join(allowed.Names(), ", "))
 		}
 		out = append(out, Sort{Field: col, Desc: it.Desc})
 	}
-	return out
+	return out, nil
 }
 
 func normaliseOperator(s string) Operator {
@@ -200,10 +353,23 @@ func normaliseOperator(s string) Operator {
 		return OpLte
 	case "between":
 		return OpBetween
-	default:
+	case "regex", "match":
+		// Clients send these meaning "contains". Mapping them to LIKE rather
+		// than refusing them: they were silently becoming equality, so a text
+		// search returned zero rows and read as "no data". Accepting the
+		// spelling costs nothing and matches what the caller meant.
+		return OpLike
+	case "", "eq", "equal", "equals", "=", "==", "is":
 		return OpEq
+	default:
+		return opUnknown
 	}
 }
+
+// opUnknown marks an operator the server does not implement, so parseFilters
+// can refuse it rather than quietly comparing for equality — which returned
+// zero rows and looked like an empty result set instead of a bad request.
+const opUnknown Operator = "?"
 
 // FromProto converts a gRPC Query into Params, applying the same allowlist and
 // clamping as the HTTP path.

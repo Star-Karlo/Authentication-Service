@@ -2,7 +2,20 @@
 #
 # Apply platform-terraform first: this reads its outputs by remote state.
 
-environment          = "prod"
+environment = "prod"
+
+# Network placement. MUST match the platform's setting of the same name.
+#
+#   false — tasks in private subnets, egress through a NAT gateway.
+#           Costs about $42/month (gateway plus data processing).
+#   true  — tasks in public subnets with public IPs, no NAT gateway.
+#           Still not reachable: the security group admits only the load
+#           balancer. What it gives up is defence in depth — a compromised
+#           task could reach the internet directly rather than through a
+#           chokepoint you can watch.
+#
+# false is the safe default. Set true deliberately, knowing the trade.
+tasks_in_public_subnets = false
 cors_allowed_origins = ["https://app.karlo.co.id"]
 fluentd_host         = "fluentd.karlo.internal"
 
@@ -10,8 +23,8 @@ fluentd_host         = "fluentd.karlo.internal"
 # so it gets a larger baseline than the others and never runs as a single task.
 task_cpu      = 512
 task_memory   = 1024
-desired_count = 2
-min_capacity  = 2
+desired_count = 1
+min_capacity  = 1
 max_capacity  = 6
 
 extra_environment = [

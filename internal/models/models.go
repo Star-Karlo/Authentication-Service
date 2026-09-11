@@ -5,10 +5,13 @@
 package models
 
 import (
+	"strings"
+
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/karlo/authentication-service/internal/platform/abbrev"
 	"time"
 
 	"github.com/google/uuid"
@@ -73,6 +76,33 @@ func (m *JSONMap) Scan(src interface{}) error {
 	return json.Unmarshal(b, m)
 }
 
+// JSONList is a JSONB column holding an array of strings.
+//
+// It exists because JSONMap cannot represent one: a column declared
+// `JSONB NOT NULL DEFAULT '[]'` hands every freshly-inserted row an array, and
+// scanning that into a map fails. The failure surfaces at login, on the SELECT,
+// so a user created with the column left at its default cannot sign in at all.
+type JSONList []string
+
+func (l JSONList) Value() (driver.Value, error) {
+	if l == nil {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(l)
+}
+
+func (l *JSONList) Scan(src interface{}) error {
+	if src == nil {
+		*l = JSONList{}
+		return nil
+	}
+	b, ok := src.([]byte)
+	if !ok {
+		return fmt.Errorf("models: cannot scan %T into JSONList", src)
+	}
+	return json.Unmarshal(b, l)
+}
+
 // CompanySettings are the per-company business toggles.
 type CompanySettings struct {
 	CancelWithValidate               bool    `json:"cancelWithValidate"`
@@ -101,14 +131,32 @@ func (s *CompanySettings) Scan(src interface{}) error {
 
 // Company is a tenant.
 type Company struct {
-	ID       uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
-	LegacyID *string   `gorm:"column:legacy_id" json:"legacyId,omitempty"`
+	ID uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
 
-	Name           string  `gorm:"not null" json:"name"`
-	Role           string  `gorm:"not null" json:"role"`
+	// DerivedFromLegacyUserID is the Mongo id of the USER this company was
+	// derived from. There were no companies in the legacy data — each
+	// parentless user became one — so naming it legacy_id said what it held
+	// but not what it meant. It is also the import's idempotency key.
+	DerivedFromLegacyUserID *string `gorm:"column:derived_from_legacy_user_id" json:"derivedFromLegacyUserId,omitempty"`
+
+	Name string `gorm:"not null" json:"name"`
+
+	// Role is which side of the market this company trades on: shipper or
+	// transporter. It drives which screens the tenant sees. Unrelated to the
+	// per-person roles table — this is a property of the business.
+	Role string `gorm:"not null" json:"role"`
+
+	// Abbreviation is the short code that appears in agreement numbers:
+	// AGR-<transporter>-<client>-000001. Derived from the name on creation and
+	// editable afterwards.
+	//
+	// NOT unique, deliberately. Two companies can genuinely share three
+	// letters, and refusing the second registration for a cosmetic clash would
+	// be worse than the clash — uniqueness of the agreement number comes from
+	// its sequence, not from these codes.
+	Abbreviation *string `gorm:"column:abbreviation" json:"abbreviation,omitempty"`
+
 	NPWP           *string `gorm:"column:npwp" json:"npwp,omitempty"`
-	NoSIUP         *string `gorm:"column:no_siup" json:"noSiup,omitempty"`
-	NoTDP          *string `gorm:"column:no_tdp" json:"noTdp,omitempty"`
 	Address        *string `json:"address,omitempty"`
 	CityID         *string `gorm:"column:city_id" json:"cityId,omitempty"`
 	ProvinceID     *string `gorm:"column:province_id" json:"provinceId,omitempty"`
@@ -123,31 +171,106 @@ type Company struct {
 	IsVerified  bool `gorm:"not null;default:false" json:"isVerified"`
 	IsSuspended bool `gorm:"not null;default:false" json:"isSuspended"`
 
-	// FMSTenantID is this company's FMS-facing alias.
+	// Slug is the FMS-facing URL identifier. FMS resolves a tenant by it, so a
+	// company migrating from FMS keeps the URLs its users have bookmarked.
+	Slug *string `gorm:"column:slug" json:"slug,omitempty"`
+
+	// DefaultMaxDevices is the company-wide session cap, which a user's own
+	// MaxDevices overrides. 0 is unlimited.
+	DefaultMaxDevices int `gorm:"column:default_max_devices;not null;default:0" json:"defaultMaxDevices"`
+
+	// MaxUsers is how many ACTIVE accounts this company may hold. 0 is
+	// unlimited.
 	//
-	// FMS identifies a tenant by a bigint and its row-level security compares
-	// against it on every query across live customer data. Recording the alias
-	// here means neither product translates at runtime: the token carries both,
-	// FMS reads this, TMS reads the UUID. One concept, one primary key, one
-	// recorded alias for a system that predates the shared IAM — the same shape
-	// as the legacy_id columns carried for the Mongo migration.
+	// Soft-deleted accounts do not occupy a seat — removing somebody should
+	// free theirs. Suspended accounts DO, because a suspension is temporary and
+	// the person is expected back; freeing the seat would let somebody else
+	// take it and make their return fail.
+	MaxUsers int `gorm:"column:max_users;not null;default:0" json:"maxUsers"`
+
+	// EntityType is whether this shipper is a registered business or an
+	// individual. Both are named as the shipper on an order, so both are a
+	// companies row; a personal shipper has an NPWP and a bank account but no
+	// NIB, which is why NIB cannot be the identity key and NPWP is.
+	EntityType string `gorm:"column:entity_type;not null;default:company" json:"entityType"`
+
+	// NIB is the Nomor Induk Berusaha, which replaced SIUP and TDP in 2018.
+	// Company-only.
+	NIB *string `gorm:"column:nib" json:"nib,omitempty"`
+
+	// MergedIntoCompanyID is set when this row was found to be a duplicate.
 	//
-	// Nil for a company that has never used FMS.
-	FMSTenantID *int64 `gorm:"column:fms_tenant_id;uniqueIndex" json:"fmsTenantId,omitempty"`
+	// The row is kept rather than deleted because orders, agreements and
+	// invoices live in another service and reference this id — deleting it
+	// would break them. A forwarding pointer lets each service resolve an old
+	// id and move its own rows in its own time.
+	MergedIntoCompanyID *uuid.UUID `gorm:"column:merged_into_company_id" json:"mergedIntoCompanyId,omitempty"`
+	MergedAt            *time.Time `gorm:"column:merged_at" json:"mergedAt,omitempty"`
+
+	// CreatedByCompanyID is the transporter that stood this company up on
+	// behalf of a shipper with no account.
+	//
+	// The one fact about a claim that cannot be derived, and the permission
+	// check for who may re-issue or revoke the link — without it, any company
+	// could issue a claim link for any other.
+	CreatedByCompanyID *uuid.UUID `gorm:"type:uuid" json:"createdByCompanyId,omitempty"`
+
+	// ClaimTokenHash is the SHA-256 of the live claim link, or nil.
+	//
+	// json:"-" because this is a credential, even a hashed one, and companies
+	// rows are serialised to API clients. It cannot be reversed into a working
+	// link, so a leak grants nobody anything — but there is no reason to send
+	// it, so it is never sent.
+	//
+	// Single-use: cleared when claimed. Re-issuing overwrites, so a company has
+	// at most one live link by construction rather than by a constraint that
+	// something has to enforce.
+	ClaimTokenHash *string `gorm:"column:claim_token_hash" json:"-"`
+
+	ClaimExpiresAt      *time.Time `gorm:"column:claim_expires_at" json:"claimExpiresAt,omitempty"`
+	ClaimIssuedByUserID *uuid.UUID `gorm:"column:claim_issued_by_user_id" json:"claimIssuedByUserId,omitempty"`
 
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 	CreatedAt time.Time      `json:"createdAt"`
 	UpdatedAt time.Time      `json:"updatedAt"`
 }
 
+// BeforeCreate derives the abbreviation when the caller did not supply one.
+//
+// A hook rather than a line at each creation site. There are two of those today
+// — ordinary registration and a transporter standing up a placeholder shipper —
+// and a third would silently produce companies with no code, which shows up
+// much later as an agreement numbered AGR--ASB-000001.
+func (c *Company) BeforeCreate(*gorm.DB) error {
+	if c.Abbreviation == nil || strings.TrimSpace(*c.Abbreviation) == "" {
+		code := abbrev.FromName(c.Name)
+		c.Abbreviation = &code
+		return nil
+	}
+	code := abbrev.Normalise(*c.Abbreviation)
+	c.Abbreviation = &code
+	return nil
+}
+
 func (Company) TableName() string { return "companies" }
+
+// A placeholder company is one with no users.
+//
+// Deliberately NOT a column. A flag would be a second copy of that fact, and
+// the schema allowed it to disagree — is_placeholder could be true on a company
+// with three people in it, and nothing prevented it. Ask the question instead:
+//
+//	SELECT c.* FROM companies c
+//	WHERE NOT EXISTS (SELECT 1 FROM users u
+//	                  WHERE u.company_id = c.id AND u.deleted_at IS NULL)
+//
+// and "when was it claimed" is MIN(users.created_at) for that company.
 
 // User is a person who can authenticate.
 type User struct {
 	ID        uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
 	LegacyID  *string    `gorm:"column:legacy_id" json:"legacyId,omitempty"`
 	CompanyID *uuid.UUID `gorm:"type:uuid" json:"companyId,omitempty"`
-	ParentID  *uuid.UUID `gorm:"type:uuid" json:"parentId,omitempty"`
 
 	Username *string `json:"username,omitempty"`
 	Email    *string `json:"email,omitempty"`
@@ -158,12 +281,6 @@ type User struct {
 	PasswordHash string  `gorm:"column:password_hash;not null" json:"-"`
 	FullName     *string `json:"fullName,omitempty"`
 
-	// Role and Permission are DEPRECATED, superseded by user_product_access.
-	// They are retained so a deploy that has to be reverted still finds the
-	// data; the application no longer reads them.
-	Role       string     `gorm:"not null" json:"-"`
-	Permission Permission `gorm:"type:jsonb" json:"-"`
-
 	// IsPlatformStaff marks a Karlo employee, who administers across tenants
 	// and bypasses company entitlement in both products.
 	//
@@ -173,7 +290,14 @@ type User struct {
 	// per-product table.
 	IsPlatformStaff bool `gorm:"not null;default:false" json:"isPlatformStaff"`
 
-	AccountType string `gorm:"not null;default:subAccount" json:"accountType"`
+	// RoleID is how this person's access is granted. Every account in a company
+	// has one; only platform staff, who belong to no company, do not.
+	RoleID *uuid.UUID `gorm:"type:uuid" json:"roleId,omitempty"`
+
+	// MaxDevices caps concurrent sessions. 0 defers to the company default,
+	// which is itself 0 for unlimited — so nothing is restricted until an
+	// administrator decides to restrict it.
+	MaxDevices int `gorm:"column:max_devices;not null;default:0" json:"maxDevices"`
 
 	BirthDate *time.Time `gorm:"type:date" json:"birthDate,omitempty"`
 	Address   *string    `json:"address,omitempty"`
@@ -181,9 +305,9 @@ type User struct {
 	PhotoURL  *string    `gorm:"column:photo_url" json:"photoUrl,omitempty"`
 	Language  string     `gorm:"not null;default:id" json:"language"`
 
-	EmergencyContactName  *string `json:"emergencyContactName,omitempty"`
-	EmergencyContactPhone *string `json:"emergencyContactPhone,omitempty"`
-	AlternativePhones     JSONMap `gorm:"type:jsonb" json:"alternativePhones,omitempty"`
+	EmergencyContactName  *string  `json:"emergencyContactName,omitempty"`
+	EmergencyContactPhone *string  `json:"emergencyContactPhone,omitempty"`
+	AlternativePhones     JSONList `gorm:"type:jsonb" json:"alternativePhones,omitempty"`
 
 	IsEmailVerified bool `gorm:"not null;default:false" json:"isEmailVerified"`
 	IsPhoneVerified bool `gorm:"not null;default:false" json:"isPhoneVerified"`
@@ -192,9 +316,6 @@ type User struct {
 	// The column tag is explicit: GORM's default naming would derive
 	// "accepted_tn_c_at" from the capital C, which does not exist.
 	AcceptedTnCAt *time.Time `gorm:"column:accepted_tnc_at" json:"acceptedTncAt,omitempty"`
-
-	AverageRating *float64 `gorm:"type:numeric(3,2)" json:"averageRating,omitempty"`
-	RatingCount   int      `gorm:"not null;default:0" json:"ratingCount"`
 
 	LastLoginAt *time.Time     `json:"lastLoginAt,omitempty"`
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
@@ -206,9 +327,17 @@ type User struct {
 
 func (User) TableName() string { return "users" }
 
-// IsRootAccount reports whether the user is a company root account. Root
-// accounts bypass module permission checks, matching legacy behaviour.
-func (u *User) IsRootAccount() bool { return u.ParentID == nil }
+// IsRootAccount is gone deliberately.
+//
+// "Root" was a property of the ACCOUNT — one privileged user per company,
+// everyone else narrowed. Access is now a property of the ROLE, so the question
+// is not whether someone is root but whether their role grants everything:
+// Role.GrantsAll. That also allows what root could not — a company with two
+// administrators, or none, or an administrator who leaves without stranding the
+// company.
+//
+// Anything that used to ask IsRootAccount() should load the user's role and
+// read GrantsAll.
 
 // Session is one issued credential, revocable independently of the others.
 type Session struct {
@@ -308,26 +437,10 @@ const (
 	DocStatusRejected = "rejected"
 )
 
-// CollaborationInvite invites a company or person into a collaboration.
-type CollaborationInvite struct {
-	ID               uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
-	InviterUserID    uuid.UUID  `gorm:"type:uuid;not null" json:"inviterUserId"`
-	InviterCompanyID uuid.UUID  `gorm:"type:uuid;not null" json:"inviterCompanyId"`
-	InviteeCompanyID *uuid.UUID `gorm:"type:uuid" json:"inviteeCompanyId,omitempty"`
-	InviteeEmail     *string    `json:"inviteeEmail,omitempty"`
-	InviteePhone     *string    `json:"inviteePhone,omitempty"`
-
-	Role       string     `gorm:"not null" json:"role"`
-	Permission Permission `gorm:"type:jsonb" json:"permission"`
-	TokenHash  *string    `gorm:"column:token_hash" json:"-"`
-
-	Status      string     `gorm:"not null;default:pending" json:"status"`
-	ExpiresAt   time.Time  `gorm:"not null" json:"expiresAt"`
-	RespondedAt *time.Time `json:"respondedAt,omitempty"`
-	CreatedAt   time.Time  `json:"createdAt"`
-}
-
-func (CollaborationInvite) TableName() string { return "collaboration_invites" }
+// CollaborationInvite is gone. Inviting somebody to a company is now the claim
+// flow — see company_claim_tokens — which does the same thing safely: the token
+// is hashed, single-use and expiring, where this table stored a plain value
+// that never expired.
 
 // Invite statuses.
 const (
@@ -367,6 +480,9 @@ const (
 	AuditAPIKeyCreated    = "apikey.created"
 	AuditAPIKeyRevoked    = "apikey.revoked"
 	AuditSessionRevoked   = "session.revoked"
+	AuditCompanyMerged    = "company.merged"
+	AuditClaimIssued      = "claim.issued"
+	AuditClaimCompleted   = "claim.completed"
 )
 
 // StringArray maps a Postgres text[] column.
@@ -462,7 +578,13 @@ func parsePGArray(s string) ([]string, error) {
 // permission map says. See platform/authctx for how the two combine.
 type CompanyModule struct {
 	CompanyID uuid.UUID `gorm:"type:uuid;primaryKey" json:"companyId"`
-	Module    string    `gorm:"primaryKey" json:"module"`
+
+	// Product is part of the key. Both products have modules called dashboard,
+	// notifications and reports meaning different things, so an entitlement
+	// that did not name its product would grant the wrong one.
+	Product string `gorm:"primaryKey" json:"product"`
+
+	Module string `gorm:"primaryKey" json:"module"`
 
 	// Enabled false is not the same as an absent row: it records that the
 	// company once held the module, which matters when reinstating it and when
@@ -515,6 +637,7 @@ func (m *CompanyModule) IsActive(at time.Time) bool {
 type CompanyModuleEvent struct {
 	ID          int64      `gorm:"primaryKey" json:"id"`
 	CompanyID   uuid.UUID  `gorm:"type:uuid;not null" json:"companyId"`
+	Product     string     `gorm:"not null" json:"product"`
 	Module      string     `gorm:"not null" json:"module"`
 	Action      string     `gorm:"not null" json:"action"`
 	ActorUserID *uuid.UUID `gorm:"type:uuid" json:"actorUserId,omitempty"`
@@ -531,31 +654,136 @@ const (
 	ModuleUpdated = "updated"
 )
 
-// ProductAccess is one person's access to one product.
+// ProductAccess holds the extra permissions granted to ONE person, on top of
+// their role.
 //
-// Role and permissions live here rather than on the user because the two
-// products share no vocabulary: TMS roles are job personas (shipper, driver),
-// FMS roles are privilege tiers (operator, manager, admin). A single column
-// would mean every consumer interpreting a value it cannot validate.
+// The role says what a job does; this says what an individual may do beyond it
+// — the dispatcher who also reconciles invoices. Without it an administrator
+// must either widen a whole role for one person or invent a role for one
+// person, and both defeat the purpose of roles.
 //
-// No row means no access to that product, which is the common case — a TMS
-// driver has a tms row and no fms row.
+// Additive ONLY. Effective access is the role UNION these. A grant that could
+// also subtract would mean reading two places to know what somebody can do, and
+// a role change would silently do nothing for anyone carrying a subtraction.
 type ProductAccess struct {
-	UserID  uuid.UUID `gorm:"type:uuid;primaryKey" json:"userId"`
-	Product string    `gorm:"primaryKey" json:"product"`
+	UserID uuid.UUID `gorm:"type:uuid;primaryKey" json:"userId"`
 
-	Role string `gorm:"not null" json:"role"`
+	// Product qualifies the keys below, which are therefore stored
+	// UNQUALIFIED — "order.read", not "tms:order.read". Roles are the other
+	// way round because they span products and have no such column.
+	Product string `gorm:"primaryKey" json:"product"`
 
-	// Permissions are granted keys from the product's catalogue, flat rather
-	// than nested. This is the shape FMS already uses in production, and the
-	// nested form carried no information this does not.
-	Permissions StringArray `gorm:"type:text[]" json:"permissions"`
+	Permissions StringArray `gorm:"type:text[];not null;default:'{}'" json:"permissions"`
 
-	Enabled         bool       `gorm:"not null;default:true" json:"enabled"`
+	// Disabling keeps the row, so a temporary withdrawal does not erase the
+	// fact that the grant was ever made.
+	Enabled bool `gorm:"not null;default:true" json:"enabled"`
+
 	GrantedByUserID *uuid.UUID `gorm:"type:uuid" json:"grantedByUserId,omitempty"`
+	Note            *string    `json:"note,omitempty"`
 
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 func (ProductAccess) TableName() string { return "user_product_access" }
+
+// ---------------------------------------------------------------------------
+// Shared IAM: the concepts FMS needs and TMS did not have
+// ---------------------------------------------------------------------------
+
+// Role is a named set of permissions a company defines and assigns to people.
+//
+// This is how access is granted. A company describes its own structure —
+// Dispatch, Finance, Yard Supervisor — rather than choosing from job titles the
+// platform invented, and changing what a team may do is one edit instead of one
+// per person.
+//
+// A role spans products. A person does one job, and that job does not stop at
+// a product boundary: the same dispatcher plans loads in TMS and watches
+// vehicles in FMS.
+type Role struct {
+	ID        uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	CompanyID uuid.UUID `gorm:"type:uuid;not null" json:"companyId"`
+
+	Name        string  `gorm:"not null" json:"name"`
+	Description *string `json:"description,omitempty"`
+
+	// Permissions are PRODUCT-QUALIFIED catalogue keys: "tms:order.read",
+	// "fms:live.view".
+	//
+	// Qualified because a role has no product column to disambiguate them. No
+	// key collides between the two catalogues today, but `dashboard` is already
+	// a subject in both, so an unqualified key is one FMS release away from
+	// resolving to whichever catalogue happened to be consulted first.
+	Permissions StringArray `gorm:"type:text[];not null;default:'{}'" json:"permissions"`
+
+	// GrantsAll marks the administrator role: everything the company is
+	// entitled to, without listing it.
+	//
+	// Listing it instead would go stale the day the company buys another
+	// module — the administrator would silently not have it, which is the
+	// opposite of what an administrator means. Permissions is ignored when
+	// this is set.
+	GrantsAll bool `gorm:"column:grants_all;not null;default:false" json:"grantsAll"`
+
+	// IsSystem marks a role the platform created and a company may not delete.
+	// Every company needs at least one role that can administer it; allowing
+	// that one to be removed is how a company locks itself out.
+	IsSystem bool `gorm:"column:is_system;not null;default:false" json:"isSystem"`
+
+	CreatedByUserID *uuid.UUID `gorm:"type:uuid" json:"createdByUserId,omitempty"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	UpdatedAt       time.Time  `json:"updatedAt"`
+}
+
+func (Role) TableName() string { return "roles" }
+
+// Entitlement modes: how to read the ABSENCE of a company_modules row.
+const (
+	// EntitlementGrant is opt-in. A module is held only when an enabled row
+	// says so. What TMS has always done, and the safer reading: a company
+	// cannot reach something nobody decided to sell them.
+	EntitlementGrant = "grant"
+
+	// EntitlementRevoke is opt-out. A module is held UNLESS a row disables it.
+	// What FMS does today. An FMS tenant migrates as this and keeps working;
+	// flipping it to grant without backfilling would take the tenant dark.
+	EntitlementRevoke = "revoke"
+)
+
+// CompanyProductSettings records which of those two readings applies to one
+// company in one product.
+//
+// It exists because TMS and FMS disagree about what an absent entitlement row
+// means, and they fail in OPPOSITE directions — TMS closed, FMS open. Holding
+// the answer as data rather than as an assumption in code is what makes the
+// eventual convergence survivable: tenants move one at a time, each move is
+// reversible, and a mistake affects one customer rather than all of them.
+type CompanyProductSettings struct {
+	CompanyID uuid.UUID `gorm:"type:uuid;primaryKey" json:"companyId"`
+	Product   string    `gorm:"primaryKey" json:"product"`
+
+	EntitlementMode string `gorm:"column:entitlement_mode;not null;default:grant" json:"entitlementMode"`
+
+	// Set when a tenant is moved from opt-out to opt-in, so the convergence can
+	// be audited: who moved, when, and who is left.
+	ConvertedAt       *time.Time `json:"convertedAt,omitempty"`
+	ConvertedByUserID *uuid.UUID `gorm:"type:uuid" json:"convertedByUserId,omitempty"`
+
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+func (CompanyProductSettings) TableName() string { return "company_product_settings" }
+
+// Session revocation reasons, recorded so a support question about an ended
+// session has an answer beyond "it was revoked".
+const (
+	RevokedByLogout         = "logout"
+	RevokedByRotation       = "rotated"
+	RevokedByReuse          = "reuse_detected"
+	RevokedByPasswordChange = "password_change"
+	RevokedByAccessChange   = "access_change"
+	RevokedBySuspension     = "suspended"
+)

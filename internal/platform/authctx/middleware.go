@@ -3,6 +3,7 @@ package authctx
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -25,6 +26,20 @@ type RemoteValidator interface {
 // common case and costs no network call. The remote path is used only for
 // tokens local verification cannot settle.
 func RequireAuth(v *Verifier, remote RemoteValidator) gin.HandlerFunc {
+	return RequireAuthWithRevocations(v, remote, nil)
+}
+
+// RequireAuthWithRevocations is RequireAuth plus a locally-held list of tokens
+// that must no longer be accepted.
+//
+// A locally-verified token is otherwise valid until it expires, which with a
+// two-hour lifetime means suspending somebody leaves them working for two
+// hours. The list closes that without putting the authentication service on the
+// critical path of every request: it is announced to, and answers from memory.
+//
+// A nil checker keeps the previous behaviour, so a service that has not been
+// wired up yet still runs.
+func RequireAuthWithRevocations(v *Verifier, remote RemoteValidator, revoked RevocationChecker) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := ExtractToken(c)
 		if token == "" {
@@ -32,8 +47,15 @@ func RequireAuth(v *Verifier, remote RemoteValidator) gin.HandlerFunc {
 			return
 		}
 
-		principal, err := v.Verify(token)
+		principal, issuedAt, err := v.VerifyWithIssuedAt(token)
 		if err == nil && !principal.SingleDevice {
+			// The one check that stands between a locally-verified token and
+			// two hours of access it should no longer have.
+			if revoked != nil && revoked.Revoked(principal.TokenID, principal.UserID, principal.CompanyID, issuedAt) {
+				abort(c, "Akses Anda telah berubah. Silakan login ulang. "+
+					"(Your access changed; please sign in again.)")
+				return
+			}
 			bind(c, principal)
 			return
 		}
@@ -48,11 +70,26 @@ func RequireAuth(v *Verifier, remote RemoteValidator) gin.HandlerFunc {
 
 		principal, rerr := remote.ValidateToken(c.Request.Context(), token)
 		if rerr != nil {
-			abort(c, "Silahkan untuk login ulang")
+			// This is usually a single-device session that was DISPLACED —
+			// the same account signed in somewhere else and that eviction is
+			// immediate. "Please log in again" reads as expiry, which sends
+			// whoever hits it looking at token lifetimes instead of at the
+			// other browser tab they just used.
+			abort(c, "Sesi Anda berakhir karena akun ini masuk di perangkat lain. "+
+				"Silakan login ulang. (Signed in on another device.)")
 			return
 		}
 		bind(c, principal)
 	}
+}
+
+// RevocationChecker reports whether a token must no longer be accepted.
+//
+// Declared here rather than imported so authctx keeps no dependency on the
+// package that implements it — the middleware needs the question, not the
+// machinery behind the answer.
+type RevocationChecker interface {
+	Revoked(sessionID, userID, companyID string, issuedAt time.Time) bool
 }
 
 // RequireRole aborts with 403 unless the caller holds one of the given roles.
@@ -65,6 +102,31 @@ func RequireRole(roles ...string) gin.HandlerFunc {
 		}
 		if !p.HasRole(roles...) {
 			c.AbortWithStatusJSON(403, gin.H{"success": false, "message": "Access Denied"})
+			return
+		}
+		c.Next()
+	}
+}
+
+// RequirePlatformStaff aborts unless the caller is a Karlo employee.
+//
+// This is the only guard a tenant cannot satisfy by any arrangement of
+// permissions or entitlement. It exists for the decisions that are Karlo's
+// rather than the customer's — above all, which modules a company has bought.
+// A company that could grant itself entitlement would have no commercial
+// boundary at all, so this check must never be expressible as a permission key.
+func RequirePlatformStaff() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		p, ok := FromContext(c.Request.Context())
+		if !ok {
+			abort(c, "No token provided.")
+			return
+		}
+		if !p.IsPlatformStaff {
+			c.AbortWithStatusJSON(403, gin.H{
+				"success": false,
+				"message": "This action is restricted to Karlo staff.",
+			})
 			return
 		}
 		c.Next()

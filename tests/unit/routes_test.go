@@ -1,12 +1,15 @@
 package unit
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/karlo/authentication-service/internal/config"
@@ -244,5 +247,42 @@ func TestRequestIDIsAssigned(t *testing.T) {
 
 	if got := rec.Header().Get("X-Request-Id"); got != supplied {
 		t.Errorf("X-Request-Id = %q, want the supplied %q", got, supplied)
+	}
+}
+
+// TestHealthChecksAreNotLogged pins the log-volume optimisation.
+//
+// The load balancer and the container health check both poll /health every 30
+// seconds. Logging a successful poll produces roughly 350,000 lines a month
+// across four services that say nothing happened, and CloudWatch bills per GB
+// ingested. A FAILING check is still logged, because that is the only time it
+// carries information.
+func TestHealthChecksAreNotLogged(t *testing.T) {
+	var logged bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logged, nil)))
+	t.Cleanup(func() { slog.SetDefault(original) })
+
+	router := buildRouter(t, "development")
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /health = %d, want 200", rec.Code)
+	}
+	if strings.Contains(logged.String(), "/health") {
+		t.Errorf("a successful health check was logged: %s", logged.String())
+	}
+
+	// A request that fails must still be logged, health endpoint or not.
+	logged.Reset()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if !strings.Contains(logged.String(), "/api/v1/auth/me") {
+		t.Error("a rejected request was not logged")
 	}
 }

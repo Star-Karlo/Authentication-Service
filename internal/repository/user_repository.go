@@ -30,6 +30,23 @@ func NewUserRepository(db *gorm.DB) *UserRepository {
 	return &UserRepository{db: db}
 }
 
+// Transaction runs fn inside a database transaction, rolling back if it
+// returns an error. It lives on this repository because the service layer has
+// no database handle of its own and should not grow one: the transaction
+// boundary is a persistence concern, and the callers pass repositories bound to
+// the transaction through WithTx.
+func (r *UserRepository) Transaction(ctx context.Context, fn func(tx *gorm.DB) error) error {
+	return r.db.WithContext(ctx).Transaction(fn)
+}
+
+// WithTx returns a repository that writes through the given transaction.
+func (r *UserRepository) WithTx(tx *gorm.DB) *UserRepository {
+	if tx == nil {
+		return r
+	}
+	return &UserRepository{db: tx}
+}
+
 // userListFields is the allowlist for filtering and sorting the user list.
 // A field absent from this map cannot be referenced by a client at all.
 var userListFields = query.FieldSet{
@@ -52,7 +69,14 @@ func UserListFields() query.FieldSet { return userListFields }
 // FindByID returns a live user.
 func (r *UserRepository) FindByID(ctx context.Context, id uuid.UUID) (*models.User, error) {
 	var user models.User
-	err := r.db.WithContext(ctx).First(&user, "id = ?", id).Error
+	err := r.db.WithContext(ctx).
+		// Company is preloaded for the same reason as in FindByIdentifier: the
+		// identity this feeds carries companyRole, which is what a client
+		// switches on to choose a console. /auth/me built its identity from
+		// this lookup, so without the preload a page refresh returned a
+		// different answer from the login that preceded it.
+		Preload("Company").
+		First(&user, "id = ?", id).Error
 	return one(&user, err)
 }
 
@@ -95,6 +119,11 @@ func (r *UserRepository) FindByIdentifier(ctx context.Context, identifier string
 
 	var user models.User
 	err := r.db.WithContext(ctx).
+		// Company is preloaded because the session limit falls back to it:
+		// users.max_devices of 0 defers to companies.default_max_devices.
+		// Without the preload that fallback silently never fires, and every
+		// account reads as unlimited regardless of company policy.
+		Preload("Company").
 		Where("email = ? OR username = ? OR phone = ?", identifier, identifier, identifier).
 		First(&user).Error
 	return one(&user, err)
@@ -231,4 +260,22 @@ func one[T any](v *T, err error) (*T, error) {
 		return nil, fmt.Errorf("repository: query: %w", err)
 	}
 	return v, nil
+}
+
+// SetRole points an account at a role.
+//
+// Separate from a general update so the one field that decides all of a
+// person's access cannot be changed as a side effect of editing their phone
+// number.
+func (r *UserRepository) SetRole(ctx context.Context, userID, roleID uuid.UUID) error {
+	res := r.db.WithContext(ctx).Model(&models.User{}).
+		Where("id = ?", userID).
+		Update("role_id", roleID)
+	if res.Error != nil {
+		return fmt.Errorf("repository: set role: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

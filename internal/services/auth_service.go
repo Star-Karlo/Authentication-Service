@@ -34,13 +34,14 @@ var (
 	ErrTokenInvalid       = errors.New("token invalid")
 )
 
-// singleDeviceRoles are the roles the legacy system bound to one device at a
-// time via the tokenKapps field. Logging in on a second device evicts the first.
-var singleDeviceRoles = map[string]bool{
-	"shipper":     true,
-	"transporter": true,
-	"manager":     true,
-}
+// The legacy one-device rule now lives in data, not in this map.
+//
+// It used to be `singleDeviceRoles = {shipper, transporter, manager}`, copied
+// from the legacy `tokenKapps` behaviour and keyed on the deprecated role
+// varchar. 000006 turned it into `users.max_devices` with a company default
+// behind it, which says the same thing per account and can be changed without
+// a deploy. The import set it to 1 for everyone who had a single-device
+// session, so nobody's limit changed.
 
 // AuthService issues, verifies and revokes credentials.
 type AuthService struct {
@@ -174,7 +175,22 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*LoginResult, e
 // issueSession mints a token pair and persists the session behind it.
 func (s *AuthService) issueSession(ctx context.Context, user *models.User, in LoginInput) (*LoginResult, error) {
 	tokenID := uuid.New()
-	singleDevice := singleDeviceRoles[user.Role]
+
+	// How many devices this account may hold at once.
+	//
+	// The user's own limit wins; 0 defers to the company's; the company's 0
+	// means unlimited. So nothing is restricted until somebody decides to
+	// restrict it, and one account can differ from the company policy without
+	// the policy being rewritten.
+	//
+	// This replaces reading `singleDeviceRoles[user.Role]`, which consulted the
+	// DEPRECATED role varchar — a live decision resting on a column nothing has
+	// maintained since 000003.
+	maxDevices := user.MaxDevices
+	if maxDevices == 0 && user.Company != nil {
+		maxDevices = user.Company.DefaultMaxDevices
+	}
+	singleDevice := maxDevices == 1
 
 	refreshToken, refreshHash, err := generateRefreshToken()
 	if err != nil {
@@ -233,9 +249,6 @@ func (s *AuthService) mintAccessToken(ctx context.Context, user *models.User, to
 	if user.CompanyID != nil {
 		principal.CompanyID = user.CompanyID.String()
 	}
-	if user.ParentID != nil {
-		principal.ParentID = user.ParentID.String()
-	}
 
 	// The per-product access map: which products this person may use, in what
 	// role, with which permissions, and what their company is entitled to in
@@ -251,12 +264,6 @@ func (s *AuthService) mintAccessToken(ctx context.Context, user *models.User, to
 			"user_id", user.ID, "error", aerr)
 	} else {
 		principal.Access = access
-	}
-
-	// The company's FMS-facing alias, so FMS reads its bigint tenant id
-	// straight from the token instead of translating the UUID per request.
-	if user.Company != nil && user.Company.FMSTenantID != nil {
-		principal.FMSTenantID = *user.Company.FMSTenantID
 	}
 
 	token, err := s.signer.Sign(principal, jwt.RegisteredClaims{
@@ -411,9 +418,6 @@ func (s *AuthService) validateAPIKey(ctx context.Context, key string) (authctx.P
 	}
 	if user.CompanyID != nil {
 		principal.CompanyID = user.CompanyID.String()
-	}
-	if user.ParentID != nil {
-		principal.ParentID = user.ParentID.String()
 	}
 
 	// An API key is subject to exactly the same access as a login. Omitting

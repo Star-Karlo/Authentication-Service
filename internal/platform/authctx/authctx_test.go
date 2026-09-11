@@ -47,11 +47,9 @@ func TestSignAndVerifyRoundTrip(t *testing.T) {
 	}
 
 	want := Principal{
-		UserID:      "user-1",
-		CompanyID:   "company-1",
-		FMSTenantID: 42,
-		ParentID:    "parent-1",
-		TokenID:     "session-1",
+		UserID:    "user-1",
+		CompanyID: "company-1",
+		TokenID:   "session-1",
 		Access: map[Product]ProductAccess{
 			ProductTMS: {
 				Role:        "transporter",
@@ -85,9 +83,6 @@ func TestSignAndVerifyRoundTrip(t *testing.T) {
 	}
 	// The FMS alias must survive: without it FMS would have to translate the
 	// company UUID on every request to set app.current_tenant.
-	if got.FMSTenantID != want.FMSTenantID {
-		t.Errorf("FMS tenant alias did not survive: %d", got.FMSTenantID)
-	}
 	if got.RoleIn(ProductTMS) != "transporter" || got.RoleIn(ProductFMS) != "operator" {
 		t.Errorf("per-product roles did not survive: %+v", got.Access)
 	}
@@ -279,7 +274,6 @@ func TestAccessIsThreeConditions(t *testing.T) {
 	p := Principal{
 		UserID:    "user-1",
 		CompanyID: "company-1",
-		ParentID:  "parent-1",
 		Access: map[Product]ProductAccess{
 			ProductTMS: {
 				Role:        "shipper",
@@ -361,7 +355,6 @@ func TestGatingFeatureIsNotDerivedFromTheKey(t *testing.T) {
 
 	// The behaviour that follows from it: holding `live` grants fuel.view.
 	p := Principal{
-		ParentID: "parent-1",
 		Access: map[Product]ProductAccess{
 			ProductFMS: {
 				Role:        "operator",
@@ -379,12 +372,17 @@ func TestGatingFeatureIsNotDerivedFromTheKey(t *testing.T) {
 	}
 }
 
-// TestUngatedPermissionsNeedNoEntitlement covers the master-data and
-// administration surface, which is available to any company that has the
-// product at all.
-func TestUngatedPermissionsNeedNoEntitlement(t *testing.T) {
-	p := Principal{
-		ParentID: "parent-1",
+// TestEveryPermissionIsGated covers the master-data and administration
+// surface, which is granted to every company by default but is NOT ungated.
+//
+// The distinction is the whole point of the catalogue: an ungated key skips the
+// entitlement check entirely, so "this company holds nothing" and "nobody
+// filled the features in" become the same state and both grant everything.
+// These keys name an entitlement like any other; what makes them feel
+// unconditional is that the entitlement is granted to everyone, which is a
+// commercial decision rather than a hole in the check.
+func TestEveryPermissionIsGated(t *testing.T) {
+	withoutEntitlements := Principal{
 		Access: map[Product]ProductAccess{
 			ProductFMS: {
 				Role:        "admin",
@@ -394,15 +392,30 @@ func TestUngatedPermissionsNeedNoEntitlement(t *testing.T) {
 		},
 	}
 
-	for _, key := range []string{"vehicles.edit", "users.manage"} {
-		if !p.HasPermission(ProductFMS, key) {
-			t.Errorf("%q is ungated and should not need an entitlement", key)
+	for _, key := range []string{"vehicles.edit", "users.manage", "camera.view"} {
+		if withoutEntitlements.HasPermission(ProductFMS, key) {
+			t.Errorf("%q was allowed with no entitlement held: it is ungated", key)
 		}
 	}
 
-	// A gated one still fails.
-	if p.HasPermission(ProductFMS, "camera.view") {
-		t.Error("camera.view is gated and should need the camera entitlement")
+	// Holding the entitlements, the same permissions resolve.
+	withEntitlements := Principal{
+		Access: map[Product]ProductAccess{
+			ProductFMS: {
+				Role:        "admin",
+				Permissions: []string{"vehicles.edit", "users.manage", "camera.view"},
+				Features:    []string{"vehicle", "administration"},
+			},
+		},
+	}
+
+	for _, key := range []string{"vehicles.edit", "users.manage"} {
+		if !withEntitlements.HasPermission(ProductFMS, key) {
+			t.Errorf("%q should resolve: its feature is held", key)
+		}
+	}
+	if withEntitlements.HasPermission(ProductFMS, "camera.view") {
+		t.Error("camera.view should need the camera entitlement, which is not held")
 	}
 }
 
@@ -410,7 +423,6 @@ func TestUngatedPermissionsNeedNoEntitlement(t *testing.T) {
 // permission left behind by a renamed feature stops rather than lingering.
 func TestUnknownPermissionGrantsNothing(t *testing.T) {
 	p := Principal{
-		ParentID: "parent-1",
 		Access: map[Product]ProductAccess{
 			ProductTMS: {
 				Role:        "shipper",
@@ -455,7 +467,7 @@ func TestGrantablePermissionsIsNarrowedToTheEntitlement(t *testing.T) {
 		Access: map[Product]ProductAccess{
 			ProductFMS: {
 				Role:     "admin",
-				Features: []string{"live", "geofence"},
+				Features: []string{"live", "geofence", "vehicle", "administration"},
 			},
 		},
 	}
@@ -471,10 +483,12 @@ func TestGrantablePermissionsIsNarrowedToTheEntitlement(t *testing.T) {
 			t.Errorf("%q should be assignable: its feature is held", key)
 		}
 	}
-	// Ungated, so always offered.
+	// Granted to every company by default, so held here and therefore offered.
+	// Offered because the feature IS held, not because the key is ungated —
+	// see TestEveryPermissionIsGated.
 	for _, key := range []string{"vehicles.edit", "users.manage"} {
 		if !grantable[key] {
-			t.Errorf("%q is ungated and should always be assignable", key)
+			t.Errorf("%q should be assignable: its feature is held", key)
 		}
 	}
 	// Not entitled, so absent entirely.
@@ -498,7 +512,6 @@ func TestServiceProductScopesTheConvenienceHelpers(t *testing.T) {
 	t.Cleanup(func() { SetProduct(original) })
 
 	p := Principal{
-		ParentID: "parent-1",
 		Access: map[Product]ProductAccess{
 			ProductTMS: {Role: "shipper", Permissions: []string{"order.read"}, Features: []string{"order"}},
 			ProductFMS: {Role: "operator", Permissions: []string{"live.view"}, Features: []string{"live"}},

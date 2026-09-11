@@ -1,0 +1,262 @@
+[
+  {
+    "key": "dashboard",
+    "label": "Dashboard",
+    "parent": ""
+  },
+  {
+    "key": "ai_dashboard",
+    "label": "AI Dashboard",
+    "parent": "dashboard"
+  },
+  {
+    "key": "live",
+    "label": "Live View",
+    "parent": ""
+  },
+  {
+    "key": "geofence",
+    "label": "Geofence",
+    "parent": "live"
+  },
+  {
+    "key": "controltower",
+    "label": "Control Tower",
+    "parent": ""
+  },
+  {
+    "key": "notifications",
+    "label": "Notifications",
+    "parent": ""
+  },
+  {
+    "key": "share_link",
+    "label": "Share Link",
+    "parent": ""
+  },
+  {
+    "key": "generate_link",
+    "label": "Generate Link",
+    "parent": "share_link"
+  },
+  {
+    "key": "reports",
+    "label": "Reporting",
+    "parent": ""
+  },
+  {
+    "key": "custom_report",
+    "label": "Custom Report",
+    "parent": "reports"
+  },
+  {
+    "key": "ai_reporting",
+    "label": "AI Reporting",
+    "parent": "reports"
+  },
+  {
+    "key": "camera",
+    "label": "Camera (TrackVision)",
+    "parent": ""
+  },
+  {
+    "key": "fleet_management",
+    "label": "Fleet Management",
+    "parent": ""
+  },
+  {
+    "key": "maintenance",
+    "label": "Maintenance",
+    "parent": "fleet_management"
+  },
+  {
+    "key": "hangars",
+    "label": "Workshops",
+    "parent": "fleet_management"
+  },
+  {
+    "key": "license",
+    "label": "License",
+    "parent": "fleet_management"
+  },
+  {
+    "key": "master_data",
+    "label": "Master Data",
+    "parent": ""
+  },
+  {
+    "key": "dashcams",
+    "label": "Dashcam",
+    "parent": "master_data"
+  },
+  {
+    "key": "rfid",
+    "label": "RFID",
+    "parent": "master_data"
+  },
+  {
+    "key": "users",
+    "label": "Users",
+    "parent": "master_data"
+  },
+  {
+    "key": "scorecard",
+    "label": "Driver Performance",
+    "parent": ""
+  },
+  {
+    "key": "marketplace",
+    "label": "Marketplace",
+    "parent": ""
+  },
+  {
+    "key": "sales",
+    "label": "Sales & Orders",
+    "parent": "",
+    "dev": true
+  },
+  {
+    "key": "orders",
+    "label": "Orders",
+    "parent": "sales",
+    "dev": true
+  },
+  {
+    "key": "invoices",
+    "label": "Invoices",
+    "parent": "sales",
+    "dev": true
+  },
+  {
+    "key": "quotations",
+    "label": "Quotations",
+    "parent": "sales",
+    "dev": true
+  },
+  {
+    "key": "procurement",
+    "label": "Procurement",
+    "parent": "",
+    "dev": true
+  },
+  {
+    "key": "purchase-orders",
+    "label": "Purchase Orders",
+    "parent": "procurement",
+    "dev": true
+  },
+  {
+    "key": "purchase-invoices",
+    "label": "Purchase Invoices",
+    "parent": "procurement",
+    "dev": true
+  },
+  {
+    "key": "purchase-quotes",
+    "label": "Purchase Quotes",
+    "parent": "procurement",
+    "dev": true
+  },
+  {
+    "key": "expenses",
+    "label": "Expenses",
+    "parent": "procurement",
+    "dev": true
+  },
+  {
+    "key": "inventory",
+    "label": "Inventory & Products",
+    "parent": "",
+    "dev": true
+  },
+  {
+    "key": "products",
+    "label": "Products",
+    "parent": "inventory",
+    "dev": true
+  },
+  {
+    "key": "stock",
+    "label": "Inventory",
+    "parent": "inventory",
+    "dev": true
+  },
+  {
+    "key": "warehouses",
+    "label": "Warehouses",
+    "parent": "inventory",
+    "dev": true
+  },
+  {
+    "key": "fixed-assets",
+    "label": "Fixed Assets",
+    "parent": "inventory",
+    "dev": true
+  },
+  {
+    "key": "finance",
+    "label": "Finance",
+    "parent": "",
+    "dev": true
+  },
+  {
+    "key": "cash-bank",
+    "label": "Cash & Bank",
+    "parent": "finance",
+    "dev": true
+  },
+  {
+    "key": "chart-of-accounts",
+    "label": "Chart of Accounts",
+    "parent": "finance",
+    "dev": true
+  },
+  {
+    "key": "cost-centers",
+    "label": "Cost Centers",
+    "parent": "finance",
+    "dev": true
+  },
+  {
+    "key": "journal",
+    "label": "Journal Entries",
+    "parent": "finance",
+    "dev": true
+  },
+  {
+    "key": "payroll",
+    "label": "Payroll",
+    "parent": "finance",
+    "dev": true
+  },
+  {
+    "key": "commerce",
+    "label": "Commerce & CRM",
+    "parent": "",
+    "dev": true
+  },
+  {
+    "key": "pos",
+    "label": "Point of Sale",
+    "parent": "commerce",
+    "dev": true
+  },
+  {
+    "key": "distribution",
+    "label": "Distribution",
+    "parent": "commerce",
+    "dev": true
+  },
+  {
+    "key": "crm",
+    "label": "CRM",
+    "parent": "commerce",
+    "dev": true
+  },
+  {
+    "key": "contacts",
+    "label": "Contacts",
+    "parent": "commerce",
+    "dev": true
+  }
+]

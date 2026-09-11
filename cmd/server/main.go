@@ -22,6 +22,7 @@ import (
 	authv1 "github.com/karlo/authentication-service/internal/platform/genproto/karlo/auth/v1"
 	"github.com/karlo/authentication-service/internal/platform/grpcutil"
 	"github.com/karlo/authentication-service/internal/platform/logger"
+	"github.com/karlo/authentication-service/internal/platform/revocation"
 	"github.com/karlo/authentication-service/internal/repository"
 	"github.com/karlo/authentication-service/internal/routes"
 	"github.com/karlo/authentication-service/internal/services"
@@ -81,6 +82,15 @@ func run() error {
 	// Optional. Without REDIS_ADDR this is a no-op and the login rate limiter
 	// falls back to counting audit rows.
 	cacheClient := cache.FromEnv("authentication")
+
+	// Lives for the process: the watcher runs until shutdown.
+	watchCtx, stopWatching := context.WithCancel(context.Background())
+	defer stopWatching()
+
+	// Revocations. The authentication service both announces them — when a
+	// session ends, a role changes or entitlement moves — and honours them,
+	// since its own routes are locally verified like everyone else's.
+	revocationChecker, revocationStore := revocation.FromEnv(watchCtx, "authentication", cfg.AccessTokenTTL)
 	defer func() {
 		if err := cacheClient.Close(); err != nil {
 			slog.Error("cache close failed", "error", err)
@@ -95,9 +105,44 @@ func run() error {
 	auditRepo := repository.NewAuditRepository(db)
 	moduleRepo := repository.NewModuleRepository(db)
 	accessRepo := repository.NewAccessRepository(db)
+	// Refuse to start on a malformed catalogue.
+	//
+	// Fatal rather than logged: an ungated permission grants access to everyone
+	// regardless of what their company bought, and a permission gated by a
+	// feature that does not exist can never be granted at all. Both are silent
+	// in production and obvious here.
+	if err := authctx.ValidateCatalogs(); err != nil {
+		slog.Error("refusing to start", "error", err)
+		os.Exit(1)
+	}
+
+	roleRepo := repository.NewRoleRepository(db)
+	catalogRepo := repository.NewCatalogRepository(db)
+	shipperService := services.NewShipperService(db, auditRepo)
+	mergeService := services.NewMergeService(db, auditRepo)
+
+	// Publish the permission keys this build declares, so a role editor has
+	// something to query. Code declares; the table reflects — a row here for a
+	// key the code does not define is marked inactive and never honoured.
+	//
+	// A failure is logged rather than fatal: the catalogue is what UIs read,
+	// not what access checks consult, so a stale copy degrades a screen rather
+	// than granting or denying anything.
+	if err := catalogRepo.Sync(context.Background()); err != nil {
+		slog.Error("could not sync the permission catalogue; role editors may "+
+			"show a stale list, but access checks are unaffected", "error", err)
+	}
+
+	if revocationStore != nil {
+		sessionRepo.SetAnnouncer(revocationStore)
+	}
 
 	authService := services.NewAuthService(userRepo, sessionRepo, apiKeyRepo, deviceRepo, moduleRepo, accessRepo, auditRepo, signer, cacheClient, cfg)
-	userService := services.NewUserService(userRepo, companyRepo, moduleRepo, accessRepo, sessionRepo, auditRepo, authService)
+	userService := services.NewUserService(userRepo, roleRepo, companyRepo, moduleRepo, accessRepo, sessionRepo, auditRepo, authService)
+	entitlementService := services.NewEntitlementService(moduleRepo, companyRepo, auditRepo)
+	if revocationStore != nil {
+		entitlementService.SetAnnouncer(revocationStore)
+	}
 
 	grpcSrv := grpcutil.NewServer(grpcutil.ServerConfig{
 		Service:               "authentication",
@@ -116,9 +161,17 @@ func run() error {
 		Verifier: signer.Public(),
 		// This service validates tokens itself, so it is its own remote
 		// validator: API keys and single-device sessions resolve in-process.
-		Remote: localValidator{auth: authService},
-		Auth:   handlers.NewAuthHandler(authService, userService),
-		User:   handlers.NewUserHandler(userService),
+		Remote:      localValidator{auth: authService},
+		Revocations: revocationChecker,
+		Catalog:     handlers.NewCatalogHandler(catalogRepo),
+		Shippers:    handlers.NewShipperHandler(shipperService, authService.HashPassword),
+		Merges:      handlers.NewMergeHandler(mergeService),
+		Auth:        handlers.NewAuthHandler(authService, userService),
+		User:        handlers.NewUserHandler(userService),
+		// The Karlo staff surface for deciding what a company has bought.
+		Entitlement: handlers.NewEntitlementHandler(entitlementService),
+		Companies:   handlers.NewCompanyHandler(companyRepo),
+		Roles:       handlers.NewRoleHandler(roleRepo),
 	})
 
 	httpSrv := &http.Server{

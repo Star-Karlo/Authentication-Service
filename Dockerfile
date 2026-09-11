@@ -9,14 +9,26 @@ RUN apk add --no-cache ca-certificates git
 WORKDIR /src
 
 COPY go.mod go.sum ./
-RUN go mod download
+
+# Cache mounts rather than layers.
+#
+# Without them every rebuild wrote the downloaded modules and the compiled
+# objects into image layers, and BuildKit kept every version of those layers
+# indefinitely — four services rebuilt a few times each is how a laptop runs out
+# of disk. A cache mount is shared between builds and swept by the daemon's
+# garbage collector, so it stays bounded AND makes rebuilds much faster, since
+# nothing is recompiled that has not changed.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 COPY . .
 
 # CGO off produces a static binary that runs on a minimal base.
-RUN CGO_ENABLED=0 GOOS=linux go build \
-    -ldflags="-s -w" \
-    -o /out/server ./cmd/server
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build \
+        -ldflags="-s -w" \
+        -o /out/server ./cmd/server
 
 FROM alpine:3.20
 

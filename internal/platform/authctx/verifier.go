@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -61,6 +62,31 @@ func (v *Verifier) Verify(token string) (Principal, error) {
 		return Principal{}, errors.New("authctx: token has no subject")
 	}
 	return claims.Principal, nil
+}
+
+// VerifyWithIssuedAt is Verify, plus when the token was minted.
+//
+// The issue time is what makes a per-user or per-company revocation possible
+// without listing every session: a cutoff refuses everything issued before it,
+// so ending a thousand sessions is one entry rather than a thousand — and a
+// fresh login afterwards is unaffected, which is what makes "sign in again" a
+// working remedy rather than a lockout.
+func (v *Verifier) VerifyWithIssuedAt(token string) (Principal, time.Time, error) {
+	claims, err := ParseClaims(token, func(t *jwt.Token) (interface{}, error) {
+		return v.pub, nil
+	})
+	if err != nil {
+		return Principal{}, time.Time{}, err
+	}
+	if claims.Principal.UserID == "" {
+		return Principal{}, time.Time{}, errors.New("authctx: token has no subject")
+	}
+
+	var issuedAt time.Time
+	if claims.IssuedAt != nil {
+		issuedAt = claims.IssuedAt.Time
+	}
+	return claims.Principal, issuedAt, nil
 }
 
 // Signer mints tokens. Only the authentication service constructs one.

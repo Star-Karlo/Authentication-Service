@@ -27,14 +27,8 @@ type Principal struct {
 	// CompanyID is the shared IAM's identifier for the tenant.
 	CompanyID string `json:"cid"`
 
-	// FMSTenantID is the same company's FMS-facing alias.
-	//
-	// FMS identifies a tenant by a bigint and its row-level security compares
-	// against it on every query across live customer data. Carrying both here
-	// means neither product translates at runtime: FMS reads this, TMS reads
-	// CompanyID. One concept, one primary key, one recorded alias for a system
-	// that predates the shared IAM.
-	FMSTenantID int64 `json:"tid,omitempty"`
+	// FMSTenantID is gone. FMS authenticates here now, so there is no separate
+	// FMS identity to alias — one company, one id, both products.
 
 	// IsPlatformStaff marks a Karlo employee, who administers across tenants
 	// and bypasses company entitlement entirely.
@@ -50,9 +44,9 @@ type Principal struct {
 	// than an edge one.
 	Access map[Product]ProductAccess `json:"acc,omitempty"`
 
-	// ParentID is set for sub-accounts. A root account is unrestricted within
-	// its company's entitlement; a sub-account is narrowed by its permissions.
-	ParentID string `json:"pid,omitempty"`
+	// Root is gone. Access is a property of the ROLE now — see
+	// ProductAccess.GrantsAll — because "one privileged account per company"
+	// could not express two administrators, or none, or one who leaves.
 
 	// SingleDevice marks sessions bound to one device (the legacy tokenKapps
 	// rule). Such tokens are confirmed against the session store, because

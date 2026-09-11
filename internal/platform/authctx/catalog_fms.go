@@ -50,16 +50,16 @@ var fmsCatalog = Catalog{
 	"license.manage":     {Key: "license.manage", Feature: "license", Group: "Fleet Management", Label: "Manage licenses"},
 
 	// Ungated: master data is available to any company with FMS.
-	"vehicles.view": {Key: "vehicles.view", Group: "Master Data", Label: "View vehicles"},
-	"vehicles.edit": {Key: "vehicles.edit", Group: "Master Data", Label: "Add / edit vehicles"},
-	"drivers.view":  {Key: "drivers.view", Group: "Master Data", Label: "View drivers"},
-	"drivers.edit":  {Key: "drivers.edit", Group: "Master Data", Label: "Add / edit drivers"},
+	"vehicles.view": {Key: "vehicles.view", Feature: "vehicle", Group: "Master Data", Label: "View vehicles"},
+	"vehicles.edit": {Key: "vehicles.edit", Feature: "vehicle", Group: "Master Data", Label: "Add / edit vehicles"},
+	"drivers.view":  {Key: "drivers.view", Feature: "driver", Group: "Master Data", Label: "View drivers"},
+	"drivers.edit":  {Key: "drivers.edit", Feature: "driver", Group: "Master Data", Label: "Add / edit drivers"},
 
 	"rfid.manage": {Key: "rfid.manage", Feature: "rfid", Group: "Master Data", Label: "Manage RFID"},
 	// Gated by `camera`, not by a `dashcams` feature.
 	"dashcams.manage": {Key: "dashcams.manage", Feature: "camera", Group: "Master Data", Label: "Manage dashcams"},
 
 	// Ungated: a company must be able to administer its own people.
-	"users.manage": {Key: "users.manage", Group: "Administration", Label: "Manage users"},
-	"roles.manage": {Key: "roles.manage", Group: "Administration", Label: "Manage roles"},
+	"users.manage": {Key: "users.manage", Feature: "administration", Group: "Administration", Label: "Manage users"},
+	"roles.manage": {Key: "roles.manage", Feature: "administration", Group: "Administration", Label: "Manage roles"},
 }

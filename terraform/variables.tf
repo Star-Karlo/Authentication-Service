@@ -36,7 +36,14 @@ variable "task_memory" {
 }
 
 variable "desired_count" {
-  description = "Baseline task count. Two in production so a deploy or an AZ loss is not an outage."
+  description = <<-EOT
+    Baseline task count.
+
+    One is the deliberate starting position. Deploys are still safe — the
+    rolling policy starts the replacement before stopping the old task — but a
+    crash or an AZ failure means downtime until ECS reschedules, roughly 30 to
+    60 seconds. Move to two when that becomes unacceptable, not before.
+  EOT
   type        = number
   default     = 1
 }
@@ -46,15 +53,28 @@ variable "min_capacity" {
   default = 1
 }
 
+variable "tasks_in_public_subnets" {
+  description = "Must match the platform's setting of the same name."
+  type        = bool
+  default     = false
+}
+
 variable "max_capacity" {
   type    = number
   default = 4
 }
 
 variable "log_retention_days" {
-  description = "CloudWatch retention. Logs are also shipped to Fluentd; this is the fallback copy."
+  description = <<-EOT
+    CloudWatch retention.
+
+    Seven days, not thirty. Logs are also forwarded to Fluentd, so this is the
+    fallback copy used for debugging something that just happened — and a week
+    covers that. Anything needing a longer history belongs in the Fluentd
+    destination, where storage is far cheaper than CloudWatch's per-GB rate.
+  EOT
   type        = number
-  default     = 30
+  default     = 7
 }
 
 # --- Service identity -------------------------------------------------------
@@ -100,8 +120,12 @@ variable "listener_priority" {
 
 variable "path_patterns" {
   description = "The paths this service claims on the shared load balancer."
+  # These must match the Vite dev proxy in karlo_platform/vite.config.ts. A path
+  # present in only one of the two works locally and 404s behind the load
+  # balancer, or the reverse — and neither failure appears until the environment
+  # the path is missing from is exercised.
   type        = list(string)
-  default     = ["/api/v1/auth/*", "/api/v1/users/*", "/api/v1/companies/*"]
+  default     = ["/api/v1/auth/*", "/api/v1/users/*", "/api/v1/admin/*", "/api/v1/shippers/*", "/api/v1/permissions/*", "/api/v1/roles/*"]
 }
 
 variable "cors_allowed_origins" {

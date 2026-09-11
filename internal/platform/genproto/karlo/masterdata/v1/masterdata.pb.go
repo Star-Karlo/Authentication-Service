@@ -754,14 +754,24 @@ type Truck struct {
 	ChassisNumber string                 `protobuf:"bytes,9,opt,name=chassis_number,json=chassisNumber,proto3" json:"chassis_number,omitempty"`
 	EngineNumber  string                 `protobuf:"bytes,10,opt,name=engine_number,json=engineNumber,proto3" json:"engine_number,omitempty"`
 	// driver_ids are the drivers currently paired with this truck.
-	DriverIds     []string               `protobuf:"bytes,11,rep,name=driver_ids,json=driverIds,proto3" json:"driver_ids,omitempty"`
-	TruckGroupId  string                 `protobuf:"bytes,12,opt,name=truck_group_id,json=truckGroupId,proto3" json:"truck_group_id,omitempty"`
-	Status        string                 `protobuf:"bytes,13,opt,name=status,proto3" json:"status,omitempty"`
-	IsAvailable   bool                   `protobuf:"varint,14,opt,name=is_available,json=isAvailable,proto3" json:"is_available,omitempty"`
-	Documents     *structpb.Struct       `protobuf:"bytes,15,opt,name=documents,proto3" json:"documents,omitempty"`
-	Deleted       bool                   `protobuf:"varint,16,opt,name=deleted,proto3" json:"deleted,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,18,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	DriverIds    []string               `protobuf:"bytes,11,rep,name=driver_ids,json=driverIds,proto3" json:"driver_ids,omitempty"`
+	TruckGroupId string                 `protobuf:"bytes,12,opt,name=truck_group_id,json=truckGroupId,proto3" json:"truck_group_id,omitempty"`
+	Status       string                 `protobuf:"bytes,13,opt,name=status,proto3" json:"status,omitempty"`
+	IsAvailable  bool                   `protobuf:"varint,14,opt,name=is_available,json=isAvailable,proto3" json:"is_available,omitempty"`
+	Documents    *structpb.Struct       `protobuf:"bytes,15,opt,name=documents,proto3" json:"documents,omitempty"`
+	Deleted      bool                   `protobuf:"varint,16,opt,name=deleted,proto3" json:"deleted,omitempty"`
+	CreatedAt    *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt    *timestamppb.Timestamp `protobuf:"bytes,18,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	// The IMEI of the tracking device currently fitted, empty when none is.
+	//
+	// Resolved from the tracker assignment that is open now — master data owns
+	// that link and its history, and the history is what stops last month's
+	// telemetry being credited to whichever vehicle holds the device today.
+	//
+	// Carried on the truck rather than fetched separately because every caller
+	// that wants a position already lists trucks, and a second round trip per
+	// truck to turn an id into an IMEI is the query this field exists to avoid.
+	Imei          string `protobuf:"bytes,19,opt,name=imei,proto3" json:"imei,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -920,6 +930,13 @@ func (x *Truck) GetUpdatedAt() *timestamppb.Timestamp {
 		return x.UpdatedAt
 	}
 	return nil
+}
+
+func (x *Truck) GetImei() string {
+	if x != nil {
+		return x.Imei
+	}
+	return ""
 }
 
 type GetTruckRequest struct {
@@ -1598,7 +1615,7 @@ const file_karlo_masterdata_v1_masterdata_proto_rawDesc = "" +
 	"company_id\x18\x02 \x01(\tR\tcompanyId\"m\n" +
 	"\x1aValidateReferencesResponse\x12\x14\n" +
 	"\x05valid\x18\x01 \x01(\bR\x05valid\x129\n" +
-	"\ainvalid\x18\x02 \x03(\v2\x1f.karlo.masterdata.v1.CatalogRefR\ainvalid\"\x89\x05\n" +
+	"\ainvalid\x18\x02 \x03(\v2\x1f.karlo.masterdata.v1.CatalogRefR\ainvalid\"\x9d\x05\n" +
 	"\x05Truck\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -1622,7 +1639,8 @@ const file_karlo_masterdata_v1_masterdata_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\x12 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"!\n" +
+	"updated_at\x18\x12 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12\x12\n" +
+	"\x04imei\x18\x13 \x01(\tR\x04imei\"!\n" +
 	"\x0fGetTruckRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"D\n" +
 	"\x10GetTruckResponse\x120\n" +

@@ -168,6 +168,17 @@ message Truck {
   bool deleted = 16;
   google.protobuf.Timestamp created_at = 17;
   google.protobuf.Timestamp updated_at = 18;
+
+  // The IMEI of the tracking device currently fitted, empty when none is.
+  //
+  // Resolved from the tracker assignment that is open now — master data owns
+  // that link and its history, and the history is what stops last month's
+  // telemetry being credited to whichever vehicle holds the device today.
+  //
+  // Carried on the truck rather than fetched separately because every caller
+  // that wants a position already lists trucks, and a second round trip per
+  // truck to turn an id into an IMEI is the query this field exists to avoid.
+  string imei = 19;
 }
 
 message GetTruckRequest {

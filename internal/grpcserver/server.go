@@ -289,6 +289,10 @@ func toProtoUser(u *models.User, access map[authctx.Product]authctx.ProductAcces
 	protoAccess := make(map[string]*authv1.ProductAccess, len(access))
 	for product, a := range access {
 		protoAccess[string(product)] = &authv1.ProductAccess{
+			// Must cross the wire: a single-device session is rebuilt from this
+			// message on every request, and an administrator without the flag
+			// arrives with an empty permission list and is refused everywhere.
+			GrantsAll:   a.GrantsAll,
 			Role:        a.Role,
 			Permissions: a.Permissions,
 			Features:    a.Features,
@@ -301,7 +305,6 @@ func toProtoUser(u *models.User, access map[authctx.Product]authctx.ProductAcces
 		Email:           deref(u.Email),
 		Phone:           deref(u.Phone),
 		FullName:        deref(u.FullName),
-		AccountType:     u.AccountType,
 		IsSuspended:     u.IsSuspended,
 		IsVerified:      u.IsVerified,
 		Deleted:         u.DeletedAt.Valid,
@@ -310,12 +313,6 @@ func toProtoUser(u *models.User, access map[authctx.Product]authctx.ProductAcces
 		IsPlatformStaff: u.IsPlatformStaff,
 		CreatedAt:       timestamppb.New(u.CreatedAt),
 		UpdatedAt:       timestamppb.New(u.UpdatedAt),
-	}
-	if u.Company != nil && u.Company.FMSTenantID != nil {
-		out.FmsTenantId = *u.Company.FMSTenantID
-	}
-	if u.ParentID != nil {
-		out.ParentId = u.ParentID.String()
 	}
 	if u.CompanyID != nil {
 		out.CompanyId = u.CompanyID.String()
@@ -328,11 +325,12 @@ func toProtoCompany(c *models.Company) *authv1.Company {
 		return nil
 	}
 	return &authv1.Company{
-		Id:      c.ID.String(),
-		Name:    c.Name,
-		Role:    c.Role,
-		Npwp:    deref(c.NPWP),
-		Address: deref(c.Address),
+		Id:           c.ID.String(),
+		Name:         c.Name,
+		Role:         c.Role,
+		Abbreviation: deref(c.Abbreviation),
+		Npwp:         deref(c.NPWP),
+		Address:      deref(c.Address),
 		Settings: &authv1.CompanySettings{
 			CancelWithValidate:               c.Settings.CancelWithValidate,
 			FinishWithGeofencing:             c.Settings.FinishWithGeofencing,

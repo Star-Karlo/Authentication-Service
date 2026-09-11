@@ -14,6 +14,21 @@ import (
 // preserved, so a request can be traced across all four services.
 const RequestIDHeader = "X-Request-Id"
 
+// quietPaths are logged only when they fail.
+//
+// The load balancer polls /health every 30 seconds, and the container health
+// check does the same. Across four services that is roughly 350,000 log lines a
+// month saying nothing happened — and CloudWatch charges per GB ingested with
+// no free tier beyond the first 5 GB, so it is noise you pay for twice: once to
+// ingest and once to store.
+//
+// A failing health check is still logged, which is the only time it carries
+// information.
+var quietPaths = map[string]bool{
+	"/health": true,
+	"/ready":  true,
+}
+
 // RequestLogger emits one structured line per request and assigns a request id.
 //
 // It deliberately does not log request bodies. This service handles passwords
@@ -40,6 +55,12 @@ func RequestLogger() gin.HandlerFunc {
 
 		c.Next()
 
+		// A successful poll of a health endpoint tells nobody anything. Log it
+		// only when it fails.
+		if quietPaths[c.Request.URL.Path] && c.Writer.Status() < 400 {
+			return
+		}
+
 		attrs := []any{
 			"request_id", requestID,
 			"method", c.Request.Method,
@@ -49,7 +70,12 @@ func RequestLogger() gin.HandlerFunc {
 			"ip", c.ClientIP(),
 		}
 		if p, ok := authctx.Gin(c); ok {
-			attrs = append(attrs, "user_id", p.UserID, "role", p.Role)
+			// Role is a method, not a field. Passing it uncalled handed slog a
+			// func value, which it cannot encode — every authenticated request
+			// logged `"role":"!ERROR:json: unsupported type: func() string"`
+			// instead of the role, exactly when the log was being read to work
+			// out why a request was refused.
+			attrs = append(attrs, "user_id", p.UserID, "role", p.Role())
 		}
 
 		switch {

@@ -85,6 +85,14 @@ type ProductAccess struct {
 	Role string `protobuf:"bytes,1,opt,name=role,proto3" json:"role,omitempty"`
 	// Granted permission keys from the product's catalogue, e.g. "order.read".
 	Permissions []string `protobuf:"bytes,2,rep,name=permissions,proto3" json:"permissions,omitempty"`
+	// grants_all marks an administrator role: everything the company is entitled
+	// to, without enumerating it.
+	//
+	// It must cross the wire. A single-device session is validated through this
+	// service on every request, so a principal rebuilt from this message IS the
+	// principal the caller acts as — and without the flag an administrator
+	// arrives with an empty permission list and is refused everywhere.
+	GrantsAll bool `protobuf:"varint,4,opt,name=grants_all,json=grantsAll,proto3" json:"grants_all,omitempty"`
 	// The COMPANY's entitlement for this product. The user's permissions can only
 	// ever narrow it.
 	Features      []string `protobuf:"bytes,3,rep,name=features,proto3" json:"features,omitempty"`
@@ -134,6 +142,13 @@ func (x *ProductAccess) GetPermissions() []string {
 		return x.Permissions
 	}
 	return nil
+}
+
+func (x *ProductAccess) GetGrantsAll() bool {
+	if x != nil {
+		return x.GrantsAll
+	}
+	return false
 }
 
 func (x *ProductAccess) GetFeatures() []string {
@@ -392,14 +407,18 @@ func (x *PermissionModule) GetActions() map[string]bool {
 }
 
 type Company struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Role          string                 `protobuf:"bytes,3,opt,name=role,proto3" json:"role,omitempty"`
-	Npwp          string                 `protobuf:"bytes,4,opt,name=npwp,proto3" json:"npwp,omitempty"`
-	Address       string                 `protobuf:"bytes,5,opt,name=address,proto3" json:"address,omitempty"`
-	Settings      *CompanySettings       `protobuf:"bytes,6,opt,name=settings,proto3" json:"settings,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Id        string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name      string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Role      string                 `protobuf:"bytes,3,opt,name=role,proto3" json:"role,omitempty"`
+	Npwp      string                 `protobuf:"bytes,4,opt,name=npwp,proto3" json:"npwp,omitempty"`
+	Address   string                 `protobuf:"bytes,5,opt,name=address,proto3" json:"address,omitempty"`
+	Settings  *CompanySettings       `protobuf:"bytes,6,opt,name=settings,proto3" json:"settings,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// The short code that appears in agreement numbers:
+	// AGR-<transporter>-<client>-000001. Derived from the name and editable.
+	// Not unique — the sequence is what makes the number unique.
+	Abbreviation  string `protobuf:"bytes,8,opt,name=abbreviation,proto3" json:"abbreviation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -481,6 +500,13 @@ func (x *Company) GetCreatedAt() *timestamppb.Timestamp {
 		return x.CreatedAt
 	}
 	return nil
+}
+
+func (x *Company) GetAbbreviation() string {
+	if x != nil {
+		return x.Abbreviation
+	}
+	return ""
 }
 
 // CompanySettings carries the per-company business toggles the legacy
@@ -1377,10 +1403,12 @@ var File_karlo_auth_v1_auth_proto protoreflect.FileDescriptor
 
 const file_karlo_auth_v1_auth_proto_rawDesc = "" +
 	"\n" +
-	"\x18karlo/auth/v1/auth.proto\x12\rkarlo.auth.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ckarlo/common/v1/common.proto\"a\n" +
+	"\x18karlo/auth/v1/auth.proto\x12\rkarlo.auth.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ckarlo/common/v1/common.proto\"\x80\x01\n" +
 	"\rProductAccess\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12 \n" +
-	"\vpermissions\x18\x02 \x03(\tR\vpermissions\x12\x1a\n" +
+	"\vpermissions\x18\x02 \x03(\tR\vpermissions\x12\x1d\n" +
+	"\n" +
+	"grants_all\x18\x04 \x01(\bR\tgrantsAll\x12\x1a\n" +
 	"\bfeatures\x18\x03 \x03(\tR\bfeatures\"\xe9\x06\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
@@ -1419,7 +1447,7 @@ const file_karlo_auth_v1_auth_proto_rawDesc = "" +
 	"\aactions\x18\x01 \x03(\v2,.karlo.auth.v1.PermissionModule.ActionsEntryR\aactions\x1a:\n" +
 	"\fActionsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"\xe6\x01\n" +
+	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"\x8a\x02\n" +
 	"\aCompany\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -1428,7 +1456,8 @@ const file_karlo_auth_v1_auth_proto_rawDesc = "" +
 	"\aaddress\x18\x05 \x01(\tR\aaddress\x12:\n" +
 	"\bsettings\x18\x06 \x01(\v2\x1e.karlo.auth.v1.CompanySettingsR\bsettings\x129\n" +
 	"\n" +
-	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"\xb6\x03\n" +
+	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\"\n" +
+	"\fabbreviation\x18\b \x01(\tR\fabbreviation\"\xb6\x03\n" +
 	"\x0fCompanySettings\x120\n" +
 	"\x14cancel_with_validate\x18\x01 \x01(\bR\x12cancelWithValidate\x124\n" +
 	"\x16finish_with_geofencing\x18\x02 \x01(\bR\x14finishWithGeofencing\x12C\n" +

@@ -6,6 +6,8 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/karlo/authentication-service/internal/models"
 	"gorm.io/gorm"
 )
@@ -35,11 +37,12 @@ func TestModelColumnsMatchTheSchema(t *testing.T) {
 		{"DeviceToken", &models.DeviceToken{}, "device_tokens"},
 		{"APIKey", &models.APIKey{}, "api_keys"},
 		{"UserDocument", &models.UserDocument{}, "user_documents"},
-		{"CollaborationInvite", &models.CollaborationInvite{}, "collaboration_invites"},
 		{"AuditEntry", &models.AuditEntry{}, "auth_audit_log"},
 		{"CompanyModule", &models.CompanyModule{}, "company_modules"},
 		{"CompanyModuleEvent", &models.CompanyModuleEvent{}, "company_module_history"},
 		{"ProductAccess", &models.ProductAccess{}, "user_product_access"},
+		{"Role", &models.Role{}, "roles"},
+		{"CompanyProductSettings", &models.CompanyProductSettings{}, "company_product_settings"},
 	}
 
 	for _, entity := range entities {
@@ -111,4 +114,49 @@ func modelColumns(db *gorm.DB, model interface{}) ([]string, error) {
 		out = append(out, field.DBName)
 	}
 	return out, nil
+}
+
+// TestRowsWithSchemaDefaultsAreReadable inserts a row using nothing but the
+// column defaults, then reads it back through the model.
+//
+// The name check above compares column names. It cannot see a type mismatch:
+// `alternative_phones JSONB NOT NULL DEFAULT '[]'` and a Go field of type
+// JSONMap agree on the name and disagree on the shape. Every user created
+// without setting that column got an array in it, and the model could only
+// unmarshal an object — so the failure landed on the SELECT during login, not
+// on the INSERT, and the user simply could not sign in.
+//
+// Inserting past the model is the point. Using the model would set the column
+// and hide the default.
+func TestRowsWithSchemaDefaultsAreReadable(t *testing.T) {
+	db := testDB(t)
+
+	companyID := uuid.NewString()
+	if err := db.Exec(`
+		INSERT INTO companies (id, name, role)
+		VALUES (?, 'Defaults Co', 'shipper')
+	`, companyID).Error; err != nil {
+		t.Fatalf("insert company: %v", err)
+	}
+	t.Cleanup(func() { db.Exec(`DELETE FROM companies WHERE id = ?`, companyID) })
+
+	userID := uuid.NewString()
+	if err := db.Exec(`
+		INSERT INTO users (id, company_id, email, password_hash, full_name)
+		VALUES (?, ?, ?, 'x', 'Defaults User')
+	`, userID, companyID, "defaults-"+userID+"@example.test").Error; err != nil {
+		t.Fatalf("insert user with defaults: %v", err)
+	}
+	t.Cleanup(func() { db.Exec(`DELETE FROM users WHERE id = ?`, userID) })
+
+	var user models.User
+	if err := db.First(&user, "id = ?", userID).Error; err != nil {
+		t.Fatalf("a user holding only schema defaults could not be read back: %v\n"+
+			"A JSONB column's default does not match the Go field's type.", err)
+	}
+
+	var company models.Company
+	if err := db.First(&company, "id = ?", companyID).Error; err != nil {
+		t.Fatalf("a company holding only schema defaults could not be read back: %v", err)
+	}
 }

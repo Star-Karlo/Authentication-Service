@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"fmt"
+	"github.com/karlo/authentication-service/internal/platform/revocation"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +20,14 @@ import (
 type CompanyRepository struct{ db *gorm.DB }
 
 func NewCompanyRepository(db *gorm.DB) *CompanyRepository { return &CompanyRepository{db: db} }
+
+// WithTx returns a repository that writes through the given transaction.
+func (r *CompanyRepository) WithTx(tx *gorm.DB) *CompanyRepository {
+	if tx == nil {
+		return r
+	}
+	return &CompanyRepository{db: tx}
+}
 
 var companyListFields = query.FieldSet{
 	"name":        "name",
@@ -83,7 +93,10 @@ func (r *CompanyRepository) List(ctx context.Context, p query.Params) ([]models.
 // Sessions
 // ---------------------------------------------------------------------------
 
-type SessionRepository struct{ db *gorm.DB }
+type SessionRepository struct {
+	db        *gorm.DB
+	announcer Announcer
+}
 
 func NewSessionRepository(db *gorm.DB) *SessionRepository { return &SessionRepository{db: db} }
 
@@ -127,15 +140,79 @@ func (r *SessionRepository) RevokeAllForUser(ctx context.Context, userID uuid.UU
 	if res.Error != nil {
 		return 0, fmt.Errorf("repository: revoke user sessions: %w", res.Error)
 	}
+
+	// Announced HERE rather than at each caller.
+	//
+	// Eight places revoke a user's sessions — suspension, password change, role
+	// change, permission change, logout-all — and any one of them could be
+	// added later without remembering to announce. Marking the database row
+	// revoked and telling the other services are the same act, so they live in
+	// the same place and cannot come apart.
+	r.announce(ctx, revocation.Event{
+		Kind: revocation.KindUser,
+		ID:   userID.String(),
+		At:   time.Now().UTC(),
+	})
+
 	return res.RowsAffected, nil
 }
 
 // RevokeOtherSingleDeviceSessions enforces the legacy one-device rule: a new
 // login on a single-device role evicts the previous one.
 func (r *SessionRepository) RevokeOtherSingleDeviceSessions(ctx context.Context, userID, keepTokenID uuid.UUID) error {
-	return r.db.WithContext(ctx).Model(&models.Session{}).
+	// The evicted token ids are collected BEFORE the update, because
+	// afterwards there is no way to tell which rows this call revoked from
+	// rows revoked a minute ago.
+	var evicted []uuid.UUID
+	err := r.db.WithContext(ctx).Model(&models.Session{}).
 		Where("user_id = ? AND single_device AND token_id <> ? AND revoked_at IS NULL", userID, keepTokenID).
-		Update("revoked_at", time.Now()).Error
+		Pluck("token_id", &evicted).Error
+	if err != nil {
+		return fmt.Errorf("repository: find sessions to evict: %w", err)
+	}
+
+	if err := r.db.WithContext(ctx).Model(&models.Session{}).
+		Where("user_id = ? AND single_device AND token_id <> ? AND revoked_at IS NULL", userID, keepTokenID).
+		Update("revoked_at", time.Now()).Error; err != nil {
+		return fmt.Errorf("repository: evict sessions: %w", err)
+	}
+
+	// Announced per SESSION, not per user. A cutoff would refuse the login
+	// that just happened — it was issued moments ago and would fall on the
+	// wrong side of the line — so the new device would evict itself.
+	for _, tokenID := range evicted {
+		r.announce(ctx, revocation.Event{
+			Kind: revocation.KindSession,
+			ID:   tokenID.String(),
+			At:   time.Now().UTC(),
+		})
+	}
+	return nil
+}
+
+// SetAnnouncer gives the repository somewhere to publish revocations.
+//
+// Optional: with none set, revocation still works, it simply takes effect when
+// the token expires rather than at once.
+func (r *SessionRepository) SetAnnouncer(a Announcer) { r.announcer = a }
+
+// Announcer publishes a revocation to the other services.
+type Announcer interface {
+	Publish(ctx context.Context, e revocation.Event) error
+}
+
+func (r *SessionRepository) announce(ctx context.Context, e revocation.Event) {
+	if r.announcer == nil {
+		return
+	}
+	if err := r.announcer.Publish(ctx, e); err != nil {
+		// The database is already updated, so the revocation is real; only its
+		// immediacy is lost. Failing the caller here would roll back a
+		// suspension because a cache was unreachable, which is worse.
+		slog.WarnContext(ctx, "session revoked but not announced; it takes "+
+			"effect when the token expires rather than immediately",
+			"kind", e.Kind, "error", err)
+	}
 }
 
 // ListActiveForUser powers a "your devices" screen.
@@ -340,46 +417,9 @@ func (r *DocumentRepository) SetStatus(ctx context.Context, id uuid.UUID, status
 // ---------------------------------------------------------------------------
 // Collaboration invites
 // ---------------------------------------------------------------------------
-
-type InviteRepository struct{ db *gorm.DB }
-
-func NewInviteRepository(db *gorm.DB) *InviteRepository { return &InviteRepository{db: db} }
-
-func (r *InviteRepository) Create(ctx context.Context, i *models.CollaborationInvite) error {
-	if err := r.db.WithContext(ctx).Create(i).Error; err != nil {
-		return fmt.Errorf("repository: create invite: %w", err)
-	}
-	return nil
-}
-
-func (r *InviteRepository) FindByTokenHash(ctx context.Context, hash string) (*models.CollaborationInvite, error) {
-	var i models.CollaborationInvite
-	return one(&i, r.db.WithContext(ctx).First(&i, "token_hash = ?", hash).Error)
-}
-
-func (r *InviteRepository) ListForCompany(ctx context.Context, companyID uuid.UUID) ([]models.CollaborationInvite, error) {
-	var out []models.CollaborationInvite
-	err := r.db.WithContext(ctx).
-		Where("inviter_company_id = ? OR invitee_company_id = ?", companyID, companyID).
-		Order("created_at DESC").Find(&out).Error
-	if err != nil {
-		return nil, fmt.Errorf("repository: list invites: %w", err)
-	}
-	return out, nil
-}
-
-func (r *InviteRepository) SetStatus(ctx context.Context, id uuid.UUID, status string) error {
-	res := r.db.WithContext(ctx).Model(&models.CollaborationInvite{}).
-		Where("id = ? AND status = ?", id, models.InviteStatusPending).
-		Updates(map[string]interface{}{"status": status, "responded_at": time.Now()})
-	if res.Error != nil {
-		return fmt.Errorf("repository: set invite status: %w", res.Error)
-	}
-	if res.RowsAffected == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
+// InviteRepository is gone with the collaboration_invites table it owned.
+// Inviting somebody into a company is the claim flow now — hashed, single-use
+// and expiring, where the old invite value was none of those.
 
 // ---------------------------------------------------------------------------
 // Audit log
@@ -420,4 +460,19 @@ func (r *AuditRepository) ListForUser(ctx context.Context, userID uuid.UUID, lim
 		return nil, fmt.Errorf("repository: list audit: %w", err)
 	}
 	return out, nil
+}
+
+// CountActiveUsers reports how many accounts occupy a seat at a company.
+//
+// Soft-deleted accounts are excluded; suspended ones are not. See
+// models.Company.MaxUsers for why the two are treated differently.
+func (r *UserRepository) CountActiveUsers(ctx context.Context, companyID uuid.UUID) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&models.User{}).
+		Where("company_id = ? AND deleted_at IS NULL", companyID).
+		Count(&n).Error
+	if err != nil {
+		return 0, fmt.Errorf("repository: count active users: %w", err)
+	}
+	return n, nil
 }

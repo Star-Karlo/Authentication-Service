@@ -12,6 +12,7 @@ import (
 	"github.com/karlo/authentication-service/internal/platform/authctx"
 	"github.com/karlo/authentication-service/internal/platform/query"
 	"github.com/karlo/authentication-service/internal/repository"
+	"gorm.io/gorm"
 )
 
 // ErrForbidden signals an authorisation failure inside the service layer.
@@ -23,6 +24,7 @@ var ErrValidation = errors.New("validation failed")
 // UserService manages accounts and their permissions.
 type UserService struct {
 	users     *repository.UserRepository
+	roles     *repository.RoleRepository
 	companies *repository.CompanyRepository
 	modules   *repository.ModuleRepository
 	access    *repository.AccessRepository
@@ -33,6 +35,7 @@ type UserService struct {
 
 func NewUserService(
 	users *repository.UserRepository,
+	roles *repository.RoleRepository,
 	companies *repository.CompanyRepository,
 	modules *repository.ModuleRepository,
 	access *repository.AccessRepository,
@@ -40,7 +43,7 @@ func NewUserService(
 	audit *repository.AuditRepository,
 	auth *AuthService,
 ) *UserService {
-	return &UserService{users: users, companies: companies, modules: modules, access: access, sessions: sessions, audit: audit, auth: auth}
+	return &UserService{users: users, roles: roles, companies: companies, modules: modules, access: access, sessions: sessions, audit: audit, auth: auth}
 }
 
 // RegisterInput describes a new account.
@@ -55,9 +58,16 @@ type RegisterInput struct {
 	// that company and is subject to permission checks.
 	ParentID  *uuid.UUID
 	CompanyID *uuid.UUID
-	// CompanyName creates a new company alongside a root account.
+	// RoleID is the role the new account will hold. Required when inviting a
+	// member; ignored when a registration creates a new tenant, since that
+	// account becomes the administrator.
+	RoleID *uuid.UUID
+	// CompanyName creates a new company alongside the administrator account.
 	CompanyName string
-	Permission  models.Permission
+
+	// Permissions are the keys a member is granted at creation. Empty for a
+	// root account, which is unrestricted within its company's entitlement.
+	Permissions []string
 }
 
 // Register creates an account, and a company when the account is a root one.
@@ -68,8 +78,16 @@ func (s *UserService) Register(ctx context.Context, in RegisterInput) (*models.U
 	if in.Email == "" && in.Phone == "" && in.Username == "" {
 		return nil, errors.New("one of email, phone or username is required")
 	}
-	if in.Role == "" {
-		return nil, errors.New("role is required")
+	// A role is required only when this registration creates a COMPANY, where
+	// it says which side of the market the company trades on — shipper or
+	// transporter — and drives which screens the tenant sees.
+	//
+	// It is NOT a person's access any more. Someone joining an existing company
+	// gets that from the role they are assigned, so requiring it here would ask
+	// the caller for a value nothing reads.
+	if in.ParentID == nil && in.CompanyID == nil && in.Role == "" {
+		return nil, errors.New("role is required when registering a new company: " +
+			"it says whether the company ships or transports")
 	}
 
 	if err := s.assertIdentifiersFree(ctx, in); err != nil {
@@ -82,47 +100,160 @@ func (s *UserService) Register(ctx context.Context, in RegisterInput) (*models.U
 	}
 
 	companyID := in.CompanyID
-	accountType := "subAccount"
+	// True when this registration is standing up a whole new tenant, in which
+	// case the account becomes its administrator.
+	newTenant := in.ParentID == nil && in.CompanyID == nil
 
-	// A registration with no parent and no company creates a new tenant.
-	if in.ParentID == nil && companyID == nil {
-		accountType = "mainAccount"
-		company := &models.Company{
-			Name: firstNonEmpty(in.CompanyName, in.FullName, in.Email),
-			Role: in.Role,
-			Settings: models.CompanySettings{
-				PPNPercentage:   0.02,
-				PPH23Percentage: 0.11,
-			},
-		}
-		if err := s.companies.Create(ctx, company); err != nil {
-			return nil, fmt.Errorf("register: %w", err)
-		}
-		companyID = &company.ID
-	}
+	var user *models.User
 
-	user := &models.User{
-		Username:     nilIfEmpty(strings.TrimSpace(in.Username)),
-		Email:        nilIfEmpty(strings.ToLower(strings.TrimSpace(in.Email))),
-		Phone:        nilIfEmpty(strings.TrimSpace(in.Phone)),
-		PasswordHash: hash,
-		FullName:     nilIfEmpty(in.FullName),
-		Role:         in.Role,
-		AccountType:  accountType,
-		CompanyID:    companyID,
-		ParentID:     in.ParentID,
-		Permission:   in.Permission,
-		Language:     "id",
-	}
-	if user.Permission == nil {
-		user.Permission = models.Permission{}
-	}
+	// Registration writes up to four rows — company, user, entitlement and
+	// product access — and a company is unusable without all of them. Done as
+	// separate statements, a failure partway through leaves exactly the state
+	// each of those writes exists to prevent: a company with no modules, or an
+	// account with no access row, which authenticates successfully and then
+	// reaches nothing. Nobody notices until the customer tries to work.
+	//
+	// So the whole sequence is one transaction. The repositories are rebound to
+	// it through WithTx; anything left on the outer handle would commit
+	// independently and defeat the point.
+	err = s.users.Transaction(ctx, func(tx *gorm.DB) error {
+		users := s.users.WithTx(tx)
+		companies := s.companies.WithTx(tx)
+		modules := s.modules.WithTx(tx)
+		access := s.access.WithTx(tx)
 
-	if err := s.users.Create(ctx, user); err != nil {
-		if errors.Is(err, repository.ErrConflict) {
-			return nil, fmt.Errorf("an account with these details already exists")
+		// A registration with no parent and no company creates a new tenant.
+		if newTenant {
+			company := &models.Company{
+				Name: firstNonEmpty(in.CompanyName, in.FullName, in.Email),
+				Role: in.Role,
+				Settings: models.CompanySettings{
+					PPNPercentage:   0.02,
+					PPH23Percentage: 0.11,
+				},
+			}
+			if err := companies.Create(ctx, company); err != nil {
+				return fmt.Errorf("register: %w", err)
+			}
+			companyID = &company.ID
 		}
-		return nil, fmt.Errorf("register: %w", err)
+
+		// Seat limit, checked INSIDE the transaction and behind a row lock.
+		//
+		// Without the lock, two administrators inviting the last seat at the
+		// same moment would both count N-1, both pass, and the company would
+		// end up one over. Locking the company row makes the second wait for
+		// the first, so it counts the seat that was just taken.
+		//
+		// Only for someone JOINING a company — registering a new one creates
+		// its first account, and a company cannot be over its limit before it
+		// exists.
+		if !newTenant && companyID != nil {
+			var limit int
+			err := tx.Raw(`SELECT max_users FROM companies WHERE id = ? FOR UPDATE`,
+				*companyID).Scan(&limit).Error
+			if err != nil {
+				return fmt.Errorf("register: read seat limit: %w", err)
+			}
+			if limit > 0 {
+				used, cerr := users.CountActiveUsers(ctx, *companyID)
+				if cerr != nil {
+					return fmt.Errorf("register: count seats: %w", cerr)
+				}
+				if used >= int64(limit) {
+					return fmt.Errorf("%w: this company has %d of %d seats in use; "+
+						"remove an account or ask Karlo to raise the limit",
+						ErrValidation, used, limit)
+				}
+			}
+		}
+
+		user = &models.User{
+			Username:     nilIfEmpty(strings.TrimSpace(in.Username)),
+			Email:        nilIfEmpty(strings.ToLower(strings.TrimSpace(in.Email))),
+			Phone:        nilIfEmpty(strings.TrimSpace(in.Phone)),
+			PasswordHash: hash,
+			FullName:     nilIfEmpty(in.FullName),
+			CompanyID:    companyID,
+			Language:     "id",
+		}
+
+		if err := users.Create(ctx, user); err != nil {
+			if errors.Is(err, repository.ErrConflict) {
+				return errors.New("an account with these details already exists")
+			}
+			return fmt.Errorf("register: %w", err)
+		}
+
+		// A new company gets its starting entitlement.
+		//
+		// Without this a company could register, authenticate, and then reach
+		// nothing at all: every module check consults company_modules, and an
+		// account with no rows there fails all of them.
+		if newTenant && companyID != nil {
+			if err := modules.GrantDefaults(ctx, tx, *companyID,
+				authctx.ProductTMS, authctx.DefaultTMSFeatures()); err != nil {
+				return fmt.Errorf("register: grant default entitlement: %w", err)
+			}
+		}
+
+		// And the account gets a role, because a role is the only way access is
+		// granted now. Without one the person authenticates successfully and is
+		// refused everywhere — the failure looks like a permissions bug rather
+		// than an incomplete registration.
+		if companyID != nil {
+			roles := s.roles.WithTx(tx)
+
+			roleID := in.RoleID
+			if roleID == nil {
+				if !newTenant {
+					// A member invited without a role named. Refusing is better
+					// than guessing: guessing high grants access nobody chose,
+					// and guessing low creates an account that cannot work and
+					// looks broken.
+					return fmt.Errorf("%w: a role is required when inviting a member", ErrValidation)
+				}
+				// The founder of a new tenant administers it. There is nobody
+				// else who could have been given the role.
+				admin, aerr := roles.EnsureAdministrator(ctx, *companyID)
+				if aerr != nil {
+					return fmt.Errorf("register: administrator role: %w", aerr)
+				}
+				roleID = &admin.ID
+			} else {
+				// A named role must belong to this company. Without the check,
+				// an id from another tenant would grant that tenant's access.
+				if _, rerr := roles.FindByID(ctx, *companyID, *roleID); rerr != nil {
+					return fmt.Errorf("%w: that role does not belong to this company", ErrForbidden)
+				}
+			}
+
+			if err := users.SetRole(ctx, user.ID, *roleID); err != nil {
+				return fmt.Errorf("register: assign role: %w", err)
+			}
+			// Reflect it on the returned value too. The write went to the
+			// database, not to this struct, so a caller inspecting the account
+			// it just created would see no role and reasonably conclude the
+			// registration was incomplete.
+			user.RoleID = roleID
+		}
+
+		// Any extra permissions the inviter chose, on top of the role.
+		if len(in.Permissions) > 0 {
+			if err := access.GrantProductAccess(ctx, &models.ProductAccess{
+				UserID:      user.ID,
+				Product:     string(authctx.ProductTMS),
+				Permissions: in.Permissions,
+				Enabled:     true,
+			}); err != nil {
+				return fmt.Errorf("register: grant extra access: %w", err)
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return user, nil
@@ -251,8 +382,10 @@ func (s *UserService) SetPermission(ctx context.Context, actorID, targetID uuid.
 	if actor.CompanyID == nil || target.CompanyID == nil || *actor.CompanyID != *target.CompanyID {
 		return ErrForbidden
 	}
-	if target.IsRootAccount() {
-		return errors.New("a root account cannot carry a permission map")
+	// An administrator already has everything the company holds, so extras
+	// would grant nothing and imply a limit that does not exist.
+	if role, rerr := s.roleOf(ctx, target); rerr == nil && role != nil && role.GrantsAll {
+		return errors.New("an administrator role already grants everything; extra permissions would add nothing")
 	}
 
 	if err := s.assertGrantable(ctx, *target.CompanyID, product, permissions); err != nil {
@@ -262,7 +395,6 @@ func (s *UserService) SetPermission(ctx context.Context, actorID, targetID uuid.
 	if err := s.access.GrantProductAccess(ctx, &models.ProductAccess{
 		UserID:          targetID,
 		Product:         string(product),
-		Role:            target.Role,
 		Permissions:     permissions,
 		Enabled:         true,
 		GrantedByUserID: &actorID,
@@ -318,6 +450,18 @@ func (s *UserService) Delete(ctx context.Context, actorID, targetID uuid.UUID) e
 }
 
 // CheckPermission answers a module.action question for one user.
+//
+// It resolves the SAME way a request does — role, plus that person's extras,
+// narrowed by what the company is entitled to — rather than consulting a
+// separate source.
+//
+// It used to end in `user.Permission.Allows(module, action)`, reading a jsonb
+// column that stopped being maintained at 000003 and stopped meaning anything
+// at 000006. Every caller of this gRPC method was therefore told "no" for
+// permissions the person genuinely held through their role. Administrators were
+// unaffected, because the grants_all check above returned first — which is
+// exactly why it survived: the accounts most likely to be tested were the ones
+// it did not break.
 func (s *UserService) CheckPermission(ctx context.Context, userID uuid.UUID, module, action string) (bool, error) {
 	user, err := s.users.FindByID(ctx, userID)
 	if err != nil {
@@ -326,11 +470,28 @@ func (s *UserService) CheckPermission(ctx context.Context, userID uuid.UUID, mod
 	if user.IsSuspended {
 		return false, nil
 	}
-	// Root accounts are unrestricted, matching the legacy rule.
-	if user.IsRootAccount() {
+
+	// Platform staff are staff everywhere, ahead of any tenant consideration.
+	if user.IsPlatformStaff {
 		return true, nil
 	}
-	return user.Permission.Allows(module, action), nil
+
+	access, err := s.access.BuildAccess(ctx, userID, user.CompanyID)
+	if err != nil {
+		return false, fmt.Errorf("check permission: %w", err)
+	}
+
+	principal := authctx.Principal{
+		UserID:          userID.String(),
+		IsPlatformStaff: user.IsPlatformStaff,
+		Access:          access,
+	}
+	if user.CompanyID != nil {
+		principal.CompanyID = user.CompanyID.String()
+	}
+
+	// The catalogue key is "module.action"; the caller passes the halves.
+	return principal.HasPermission(authctx.CurrentProduct(), module+"."+action), nil
 }
 
 // IdentifierAvailable reports whether a login identifier is free.
@@ -411,7 +572,7 @@ var _ = time.Now
 // gated by `live` and `dashcams.manage` by `camera`; deriving the gate from the
 // key would refuse permissions the company legitimately holds.
 func (s *UserService) assertGrantable(ctx context.Context, companyID uuid.UUID, product authctx.Product, permissions []string) error {
-	entitled, err := s.modules.ActiveForCompany(ctx, companyID)
+	entitled, err := s.modules.ActiveForCompany(ctx, companyID, product)
 	if err != nil {
 		return fmt.Errorf("resolve company entitlement: %w", err)
 	}
@@ -448,7 +609,7 @@ func (s *UserService) assertGrantable(ctx context.Context, companyID uuid.UUID, 
 // the company's entitlement. A company without accounting sees no accounting
 // section at all, rather than one that appears to work and then does nothing.
 func (s *UserService) GrantablePermissions(ctx context.Context, companyID uuid.UUID, product authctx.Product) ([]authctx.PermissionSpec, error) {
-	entitled, err := s.modules.ActiveForCompany(ctx, companyID)
+	entitled, err := s.modules.ActiveForCompany(ctx, companyID, product)
 	if err != nil {
 		return nil, fmt.Errorf("resolve company entitlement: %w", err)
 	}
@@ -465,4 +626,205 @@ func (s *UserService) GrantablePermissions(ctx context.Context, companyID uuid.U
 		}
 	}
 	return out, nil
+}
+
+// SetProductAccess gives a member access to a product, or changes the access
+// they have.
+//
+// This is the other half of what a company administrator does. SetPermission
+// decides what a member may do inside a product they can already reach;
+// this decides whether they can reach it at all — a person with no
+// user_product_access row for a product authenticates successfully and is then
+// refused by every route in it, with no way for their own company to fix that.
+//
+// The company's entitlement bounds it: a company cannot grant its people access
+// to a product it does not hold. That is checked against company_modules rather
+// than assumed, because the two are written by different people at different
+// times and only one of them is us.
+func (s *UserService) SetProductAccess(ctx context.Context, actorID, targetID uuid.UUID, product authctx.Product, role string, permissions []string, enabled bool) error {
+	if !authctx.IsKnownProduct(product) {
+		return fmt.Errorf("%w: %q is not a product", ErrValidation, product)
+	}
+
+	actor, err := s.users.FindByID(ctx, actorID)
+	if err != nil {
+		return err
+	}
+	target, err := s.users.FindByID(ctx, targetID)
+	if err != nil {
+		return err
+	}
+
+	// A company administrator acts only within their own company. Karlo staff
+	// are not bound by that, which is the whole point of the flag.
+	if !actor.IsPlatformStaff {
+		if actor.CompanyID == nil || target.CompanyID == nil || *actor.CompanyID != *target.CompanyID {
+			return ErrForbidden
+		}
+	}
+
+	if target.CompanyID != nil {
+		held, err := s.modules.ActiveForCompany(ctx, *target.CompanyID, product)
+		if err != nil {
+			return fmt.Errorf("resolve company entitlement: %w", err)
+		}
+		if len(held) == 0 {
+			return fmt.Errorf(
+				"%w: your company holds no %s modules, so there is nothing to grant access to",
+				ErrForbidden, product)
+		}
+		if err := s.assertGrantable(ctx, *target.CompanyID, product, permissions); err != nil {
+			return err
+		}
+	}
+
+	if err := s.access.GrantProductAccess(ctx, &models.ProductAccess{
+		UserID:          targetID,
+		Product:         string(product),
+		Permissions:     permissions,
+		Enabled:         enabled,
+		GrantedByUserID: &actorID,
+	}); err != nil {
+		return err
+	}
+
+	// Access is embedded in issued tokens, so it takes effect only once those
+	// are gone. This matters more here than for a permission change: revoking
+	// a product must not leave someone using it for another fifteen minutes.
+	if _, err := s.sessions.RevokeAllForUser(ctx, targetID); err != nil {
+		return fmt.Errorf("access updated but sessions not revoked: %w", err)
+	}
+
+	s.auth.writeAudit(ctx, &models.AuditEntry{
+		UserID: &targetID, ActorUserID: &actorID,
+		Event: models.AuditPermissionChange, Succeeded: true,
+		Detail: models.JSONMap{"product": string(product), "enabled": enabled},
+	})
+	return nil
+}
+
+// RevokeProductAccess takes a product away from a member.
+//
+// The row is disabled rather than deleted, so the grant history survives and a
+// support question about access that used to work has an answer.
+func (s *UserService) RevokeProductAccess(ctx context.Context, actorID, targetID uuid.UUID, product authctx.Product) error {
+	actor, err := s.users.FindByID(ctx, actorID)
+	if err != nil {
+		return err
+	}
+	target, err := s.users.FindByID(ctx, targetID)
+	if err != nil {
+		return err
+	}
+	if !actor.IsPlatformStaff {
+		if actor.CompanyID == nil || target.CompanyID == nil || *actor.CompanyID != *target.CompanyID {
+			return ErrForbidden
+		}
+	}
+
+	if err := s.access.RevokeProductAccess(ctx, targetID, string(product)); err != nil {
+		return err
+	}
+	if _, err := s.sessions.RevokeAllForUser(ctx, targetID); err != nil {
+		return fmt.Errorf("access revoked but sessions not revoked: %w", err)
+	}
+
+	s.auth.writeAudit(ctx, &models.AuditEntry{
+		UserID: &targetID, ActorUserID: &actorID,
+		Event: models.AuditPermissionChange, Succeeded: true,
+		Detail: models.JSONMap{"product": string(product), "enabled": false},
+	})
+	return nil
+}
+
+// ListProductAccess returns a member's access across every product.
+func (s *UserService) ListProductAccess(ctx context.Context, actorID, targetID uuid.UUID) ([]models.ProductAccess, error) {
+	actor, err := s.users.FindByID(ctx, actorID)
+	if err != nil {
+		return nil, err
+	}
+	target, err := s.users.FindByID(ctx, targetID)
+	if err != nil {
+		return nil, err
+	}
+	if !actor.IsPlatformStaff {
+		if actor.CompanyID == nil || target.CompanyID == nil || *actor.CompanyID != *target.CompanyID {
+			return nil, ErrForbidden
+		}
+	}
+	return s.access.ListForUser(ctx, targetID)
+}
+
+// ListProductAccessForService returns a user's per-product access without an
+// actor check, for internal use where the caller has already been authorised.
+//
+// Separate from ListProductAccess so the permission check on that path cannot
+// be skipped by accident: a function that takes no actor cannot forget to
+// verify one.
+func (s *UserService) ListProductAccessForService(ctx context.Context, userID uuid.UUID) ([]models.ProductAccess, error) {
+	return s.access.ListForUser(ctx, userID)
+}
+
+// roleOf loads the role an account holds, or nil when it holds none — which is
+// only platform staff, who belong to no company.
+func (s *UserService) roleOf(ctx context.Context, user *models.User) (*models.Role, error) {
+	if user == nil || user.RoleID == nil || user.CompanyID == nil {
+		return nil, nil
+	}
+	return s.roles.FindByID(ctx, *user.CompanyID, *user.RoleID)
+}
+
+// AssignRole moves a colleague to a different role.
+//
+// A dedicated method rather than a field on AdminUpdate, because the role id
+// needs a check the generic path cannot make: the role must belong to the SAME
+// company. Without it an administrator could paste another company's role id
+// and grant their people that company's permissions — the ids are opaque, so
+// nothing about the request would look wrong.
+func (s *UserService) AssignRole(ctx context.Context, actorID, targetID, roleID uuid.UUID) error {
+	actor, err := s.users.FindByID(ctx, actorID)
+	if err != nil {
+		return err
+	}
+	if actor.CompanyID == nil {
+		return errors.New("only a company may assign roles")
+	}
+
+	target, err := s.users.FindByID(ctx, targetID)
+	if err != nil {
+		return err
+	}
+	// Same company, unless the caller is Karlo staff acting across tenants.
+	if !actor.IsPlatformStaff &&
+		(target.CompanyID == nil || *target.CompanyID != *actor.CompanyID) {
+		return ErrForbidden
+	}
+
+	// The role must be the TARGET's company's, not the actor's — those differ
+	// when Karlo staff assign on a client's behalf.
+	roleOwner := *actor.CompanyID
+	if target.CompanyID != nil {
+		roleOwner = *target.CompanyID
+	}
+	if _, err := s.roles.FindByID(ctx, roleOwner, roleID); err != nil {
+		return errors.New("that role does not belong to this company")
+	}
+
+	if err := s.users.UpdateFields(ctx, targetID, map[string]interface{}{"role_id": roleID}); err != nil {
+		return err
+	}
+
+	// Access is embedded in issued tokens, so a role change takes effect only
+	// once those are gone. Without this the person keeps their old permissions
+	// for the life of a token they are already holding.
+	if _, err := s.sessions.RevokeAllForUser(ctx, targetID); err != nil {
+		return fmt.Errorf("role assigned but sessions not revoked: %w", err)
+	}
+
+	s.auth.writeAudit(ctx, &models.AuditEntry{
+		UserID: &targetID, ActorUserID: &actorID,
+		Event: models.AuditPermissionChange, Succeeded: true,
+		Detail: models.JSONMap{"roleId": roleID.String()},
+	})
+	return nil
 }

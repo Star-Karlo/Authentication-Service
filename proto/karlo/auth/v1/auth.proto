@@ -54,6 +54,15 @@ message ProductAccess {
   string role = 1;
   // Granted permission keys from the product's catalogue, e.g. "order.read".
   repeated string permissions = 2;
+  // grants_all marks an administrator role: everything the company is entitled
+  // to, without enumerating it.
+  //
+  // It must cross the wire. A single-device session is validated through this
+  // service on every request, so a principal rebuilt from this message IS the
+  // principal the caller acts as — and without the flag an administrator
+  // arrives with an empty permission list and is refused everywhere.
+  bool grants_all = 4;
+
   // The COMPANY's entitlement for this product. The user's permissions can only
   // ever narrow it.
   repeated string features = 3;
@@ -109,6 +118,11 @@ message Company {
   string address = 5;
   CompanySettings settings = 6;
   google.protobuf.Timestamp created_at = 7;
+
+  // The short code that appears in agreement numbers:
+  // AGR-<transporter>-<client>-000001. Derived from the name and editable.
+  // Not unique — the sequence is what makes the number unique.
+  string abbreviation = 8;
 }
 
 // CompanySettings carries the per-company business toggles the legacy

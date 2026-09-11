@@ -5,6 +5,7 @@ package response
 
 import (
 	"net/http"
+	"reflect"
 
 	"github.com/gin-gonic/gin"
 )
@@ -43,7 +44,23 @@ func Created(c *gin.Context, data interface{}) {
 }
 
 func Paginated(c *gin.Context, data interface{}, meta *Meta) {
-	c.JSON(http.StatusOK, successBody{Success: true, Data: data, Meta: meta})
+	c.JSON(http.StatusOK, successBody{Success: true, Data: emptyList(data), Meta: meta})
+}
+
+// emptyList turns a nil slice into an empty one so a page with no rows
+// marshals as [] rather than null.
+//
+// A Go nil slice and an empty slice are the same thing to Go and different
+// things to every client: `data.map(...)` on null throws, so an empty result
+// crashes the page that renders it while a populated result works. The fix
+// belongs here rather than in each handler, because the ones that forget are
+// exactly the endpoints nobody has yet seen return nothing.
+func emptyList(data interface{}) interface{} {
+	v := reflect.ValueOf(data)
+	if v.Kind() == reflect.Slice && v.IsNil() {
+		return reflect.MakeSlice(v.Type(), 0, 0).Interface()
+	}
+	return data
 }
 
 func BadRequest(c *gin.Context, message string) {

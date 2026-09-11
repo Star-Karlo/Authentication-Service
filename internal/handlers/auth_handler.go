@@ -32,6 +32,19 @@ type loginRequest struct {
 	Password string `json:"password" binding:"required"`
 	DeviceID string `json:"deviceId"`
 	Platform string `json:"platform"`
+
+	// Product names the app the person is signing in FROM: "tms" or "fms".
+	//
+	// It is optional and it does NOT change the token. One identity serves both
+	// products, and a token minted at the FMS door must be identical to one
+	// minted at the TMS door — otherwise the same account behaves differently
+	// depending on where it signed in, which is exactly the coupling a shared
+	// IAM exists to remove.
+	//
+	// What it changes is the ERROR. Without it, someone with no FMS access who
+	// signs in to FMS authenticates successfully and is then refused by every
+	// screen, with nothing to explain why. With it, they are told at the door.
+	Product string `json:"product"`
 }
 
 // Login authenticates and opens a session.
@@ -63,7 +76,55 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	response.OK(c, result)
+	// If the caller said which app they came from, check they can actually use
+	// it. The credentials were right, so this is not an authentication failure
+	// and the session stands — it is a clearer message in place of a silent
+	// wall of empty screens.
+	principal := principalOf(c, result)
+	if req.Product != "" {
+		product := authctx.Product(req.Product)
+		if !authctx.IsKnownProduct(product) {
+			response.BadRequest(c, "Unknown product: "+req.Product)
+			return
+		}
+		if !principal.HasProduct(product) {
+			response.Forbidden(c, "This account does not have access to "+
+				req.Product+". Ask your company administrator to grant it.")
+			return
+		}
+	}
+
+	// The same identity shape as /auth/me, so a client parses one thing rather
+	// than reconciling two.
+	response.OK(c, gin.H{
+		"tokens": result.Tokens,
+		// Kept as `token` too: the access token is what clients attach to
+		// requests, and making them reach into a nested object for the common
+		// case is friction for no benefit.
+		"token": result.Tokens.AccessToken,
+		"user":  buildIdentity(result.User, principal),
+	})
+}
+
+// principalOf rebuilds the principal for a freshly minted token, so the login
+// response can carry the same access detail /auth/me does without the client
+// making a second call.
+func principalOf(c *gin.Context, result *services.LoginResult) authctx.Principal {
+	if result == nil || result.User == nil {
+		return authctx.Principal{}
+	}
+	// The token was just minted from this user, so verifying it back is the
+	// cheapest way to get exactly the access it carries — and guarantees the
+	// response describes the token the client actually received.
+	p, err := authctx.NewVerifierFromEnv()
+	if err != nil {
+		return authctx.Principal{}
+	}
+	principal, err := p.Verify(result.Tokens.AccessToken)
+	if err != nil {
+		return authctx.Principal{}
+	}
+	return principal
 }
 
 type registerRequest struct {
@@ -127,7 +188,17 @@ func (h *AuthHandler) RegisterMember(c *gin.Context) {
 
 	var req struct {
 		registerRequest
-		Permission models.Permission `json:"permission"`
+		// Permission keys from this product's catalogue, e.g. "order.read".
+		Permissions []string `json:"permissions"`
+
+		// RoleID is the role the new colleague holds, and it is REQUIRED for a
+		// member — the service refuses to guess, because guessing high grants
+		// access nobody chose and guessing low creates an account that cannot
+		// work and looks broken.
+		//
+		// It was accepted by the service and never read here, so every invite
+		// failed with "a role is required" no matter what the caller sent.
+		RoleID string `json:"roleId"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, err.Error())
@@ -141,14 +212,22 @@ func (h *AuthHandler) RegisterMember(c *gin.Context) {
 	}
 
 	input := services.RegisterInput{
-		Username:   req.Username,
-		Email:      req.Email,
-		Phone:      req.Phone,
-		Password:   req.Password,
-		FullName:   req.FullName,
-		Role:       req.Role,
-		ParentID:   &parentID,
-		Permission: req.Permission,
+		Username:    req.Username,
+		Email:       req.Email,
+		Phone:       req.Phone,
+		Password:    req.Password,
+		FullName:    req.FullName,
+		Role:        req.Role,
+		ParentID:    &parentID,
+		Permissions: req.Permissions,
+	}
+	if req.RoleID != "" {
+		roleID, rerr := uuid.Parse(req.RoleID)
+		if rerr != nil {
+			response.BadRequest(c, "Invalid roleId")
+			return
+		}
+		input.RoleID = &roleID
 	}
 	if principal.CompanyID != "" {
 		companyID, perr := uuid.Parse(principal.CompanyID)
@@ -325,6 +404,12 @@ func (h *AuthHandler) CheckAvailability(c *gin.Context) {
 // @Success  200 {object} models.User
 // @Router   /auth/me [get]
 func (h *AuthHandler) Me(c *gin.Context) {
+	principal, ok := authctx.Gin(c)
+	if !ok {
+		response.Unauthorized(c, "No token provided.")
+		return
+	}
+
 	userID, ok := principalUserID(c)
 	if !ok {
 		return
@@ -336,7 +421,138 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		return
 	}
 
-	response.OK(c, user)
+	response.OK(c, buildIdentity(user, principal))
+}
+
+// identity is what a client needs to render itself: who the user is, and what
+// they may see in each product.
+//
+// The user record alone is no longer sufficient. Role and permissions moved to
+// user_product_access when identity became multi-product, so `role` is not a
+// field on the user any more — a client reading user.role would get nothing and
+// silently fall through to a default view.
+type identity struct {
+	ID              string `json:"id"`
+	Email           string `json:"email,omitempty"`
+	Username        string `json:"username,omitempty"`
+	FullName        string `json:"fullName,omitempty"`
+	Phone           string `json:"phone,omitempty"`
+	CompanyID       string `json:"companyId,omitempty"`
+	Language        string `json:"language"`
+	IsPlatformStaff bool   `json:"isPlatformStaff"`
+
+	// Role and Permissions are this service's product, flattened for
+	// convenience so a client that only speaks TMS need not walk the map.
+	//
+	// Role is the company's own NAME for the role — "Administrator", "Sales",
+	// whatever they called it. It is display text, not an identifier: a company
+	// may rename it at any time, so nothing may branch on its value.
+	Role        string   `json:"role"`
+	Permissions []string `json:"permissions"`
+
+	// CompanyRole is which side of the market the company trades on: shipper
+	// or transporter. Unlike Role it is a fixed vocabulary the platform owns,
+	// which makes it the right thing for a client to switch on when deciding
+	// WHICH CONSOLE to show. Empty for an account with no company.
+	//
+	// It was missing, and the omission broke the app: the frontend keyed its
+	// navigation off Role, which used to be a fixed code and became a
+	// company-chosen name when roles went dynamic. Every new account then
+	// resolved to no navigation at all.
+	CompanyRole string `json:"companyRole,omitempty"`
+	CompanyName string `json:"companyName,omitempty"`
+	// CompanyAbbreviation is the code that appears in agreement numbers.
+	CompanyAbbreviation string `json:"companyAbbreviation,omitempty"`
+
+	// Products lists what this person may use, so a client can render a product
+	// switcher without a second call.
+	Products []string `json:"products"`
+
+	// Access is the full per-product detail, for a client that spans both.
+	Access map[string]productAccess `json:"access"`
+}
+
+type productAccess struct {
+	Role        string   `json:"role"`
+	Permissions []string `json:"permissions"`
+	Features    []string `json:"features"`
+
+	// GrantsAll marks an administrator: everything the company is entitled to,
+	// without the keys being enumerated.
+	//
+	// Without it a client cannot tell an administrator from a user holding no
+	// permissions at all — both arrive with an empty list — so every gated
+	// control in the UI would be hidden from exactly the people who should see
+	// all of them. The server already knew; it simply was not saying.
+	GrantsAll bool `json:"grantsAll"`
+}
+
+func buildIdentity(user *models.User, principal authctx.Principal) identity {
+	out := identity{
+		ID:              user.ID.String(),
+		Email:           deref(user.Email),
+		Username:        deref(user.Username),
+		FullName:        deref(user.FullName),
+		Phone:           deref(user.Phone),
+		Language:        user.Language,
+		IsPlatformStaff: user.IsPlatformStaff,
+		Access:          map[string]productAccess{},
+		Products:        []string{},
+	}
+	if user.CompanyID != nil {
+		out.CompanyID = user.CompanyID.String()
+	}
+	if user.Company != nil {
+		out.CompanyRole = user.Company.Role
+		out.CompanyName = user.Company.Name
+		out.CompanyAbbreviation = deref(user.Company.Abbreviation)
+	}
+
+	for product, access := range principal.Access {
+		out.Products = append(out.Products, string(product))
+		out.Access[string(product)] = productAccess{
+			Role:      access.Role,
+			GrantsAll: access.GrantsAll,
+			// Always an array, never null. A root account legitimately holds no
+			// keys — it is unrestricted within its company's entitlement — and
+			// a client checking `permissions.length` on null throws rather than
+			// falling through to the entitlement check. The token itself keeps
+			// omitempty, where the saving is worth having; a response read by a
+			// browser does not need it and cannot afford the ambiguity.
+			Permissions: emptyIfNil(access.Permissions),
+			Features:    emptyIfNil(access.Features),
+		}
+	}
+
+	// Flatten this service's own product to the top level.
+	if current, ok := principal.Access[authctx.CurrentProduct()]; ok {
+		out.Role = current.Role
+		out.Permissions = emptyIfNil(current.Permissions)
+	}
+
+	// Platform staff hold no tenant role. Reporting one keeps clients that
+	// switch on role working, rather than each inventing its own convention.
+	if user.IsPlatformStaff && out.Role == "" {
+		out.Role = "superadmin"
+	}
+
+	return out
+}
+
+// emptyIfNil turns a nil slice into an empty one, so it marshals as [] rather
+// than null.
+func emptyIfNil(v []string) []string {
+	if v == nil {
+		return []string{}
+	}
+	return v
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // writeAuthError maps service errors onto HTTP status codes, without leaking

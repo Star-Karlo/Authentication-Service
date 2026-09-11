@@ -25,7 +25,19 @@ type Config struct {
 
 	Database Database
 
-	// AccessTokenTTL is short by design; refresh tokens carry the long life.
+	// AccessTokenTTL is how long an access token stays valid.
+	//
+	// It is a genuine trade rather than a tuning knob. Access tokens are
+	// stateless — nothing is consulted to honour one — so a token cannot be
+	// revoked before it expires, and the TTL IS the window in which a stolen
+	// token works. Entitlement and permissions are embedded too, so it is also
+	// how long a revoked module keeps working.
+	//
+	// Fifteen minutes, with refresh carrying the long life, is the safer shape
+	// and remains the right default for production. Two hours was chosen for
+	// development, where being signed out mid-task costs more than the
+	// exposure. Set ACCESS_TOKEN_TTL explicitly per environment rather than
+	// relying on this default.
 	AccessTokenTTL  time.Duration
 	RefreshTokenTTL time.Duration
 
@@ -91,7 +103,7 @@ func Load() (*Config, error) {
 			ConnMaxLifetime: durationOr("DB_CONN_MAX_LIFETIME", time.Hour),
 		},
 
-		AccessTokenTTL:  durationOr("ACCESS_TOKEN_TTL", 15*time.Minute),
+		AccessTokenTTL:  durationOr("ACCESS_TOKEN_TTL", 2*time.Hour),
 		RefreshTokenTTL: durationOr("REFRESH_TOKEN_TTL", 30*24*time.Hour),
 		BcryptCost:      intOr("BCRYPT_COST", 12),
 

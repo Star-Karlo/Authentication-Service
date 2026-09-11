@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/karlo/authentication-service/internal/models"
+	"github.com/karlo/authentication-service/internal/platform/authctx"
 	"github.com/karlo/authentication-service/internal/services"
 )
 
@@ -66,18 +67,57 @@ func TestPermissionAllows(t *testing.T) {
 	}
 }
 
-func TestIsRootAccountBypassesPermissions(t *testing.T) {
-	// A root account carries no permission map and is unrestricted; this
-	// reproduces the legacy rule the split must not change.
-	root := &models.User{}
-	if !root.IsRootAccount() {
-		t.Fatal("a user with no parent must be a root account")
+// TestAdministratorRoleGrantsEverythingHeld replaces the old root-account test.
+//
+// "Root" was a property of the ACCOUNT — one privileged user per company. It
+// could not express two administrators, none, or one who leaves. Access is a
+// property of the ROLE now, and an administrator role grants everything the
+// company is entitled to WITHOUT enumerating it, so it stays correct the day
+// the company buys another module.
+func TestAdministratorRoleGrantsEverythingHeld(t *testing.T) {
+	admin := authctx.Principal{
+		Access: map[authctx.Product]authctx.ProductAccess{
+			authctx.ProductTMS: {
+				Role:      "Administrator",
+				GrantsAll: true,
+				Features:  []string{"order"},
+			},
+		},
+	}
+	if !admin.HasPermission(authctx.ProductTMS, "order.read") {
+		t.Error("an administrator role must hold a permission its company is entitled to, unlisted")
+	}
+	// The limit: everything the company BOUGHT, not everything that exists.
+	if admin.HasPermission(authctx.ProductTMS, "invoice.read") {
+		t.Error("an administrator must not reach a module the company has not bought")
 	}
 
-	parentID := models.User{}.ID
-	child := &models.User{ParentID: &parentID}
-	if child.IsRootAccount() {
-		t.Fatal("a user with a parent must not be a root account")
+	// The same access without the flag grants nothing, which is what makes the
+	// flag meaningful rather than decorative.
+	member := authctx.Principal{
+		Access: map[authctx.Product]authctx.ProductAccess{
+			authctx.ProductTMS: {Role: "Dispatch", Features: []string{"order"}},
+		},
+	}
+	if member.HasPermission(authctx.ProductTMS, "order.read") {
+		t.Error("a role with no keys and no GrantsAll must grant nothing")
+	}
+
+	// And a role's keys work the ordinary way.
+	dispatch := authctx.Principal{
+		Access: map[authctx.Product]authctx.ProductAccess{
+			authctx.ProductTMS: {
+				Role:        "Dispatch",
+				Permissions: []string{"order.read"},
+				Features:    []string{"order"},
+			},
+		},
+	}
+	if !dispatch.HasPermission(authctx.ProductTMS, "order.read") {
+		t.Error("a key granted by the role must hold")
+	}
+	if dispatch.HasPermission(authctx.ProductTMS, "order.cancel") {
+		t.Error("a key the role does not grant must not hold")
 	}
 }
 
