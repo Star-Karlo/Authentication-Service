@@ -115,12 +115,17 @@ variable "listener_priority" {
 
 variable "path_patterns" {
   description = "The paths this service claims on the shared load balancer."
+  # "/api/v1/orders*", NOT "/api/v1/orders/*". An ALB wildcard matches zero
+  # or more characters, so the first form covers the bare collection path
+  # and everything under it. The second REQUIRES the slash — the bare path,
+  # which is every list call, fell through to the frontend's catch-all and
+  # came back as an HTML 404.
   # These must match the Vite dev proxy in karlo_platform/vite.config.ts. A path
   # present in only one of the two works locally and 404s behind the load
   # balancer, or the reverse — and neither failure appears until the environment
   # the path is missing from is exercised.
   type        = list(string)
-  default     = ["/api/v1/auth/*", "/api/v1/users/*", "/api/v1/admin/*", "/api/v1/shippers/*", "/api/v1/permissions/*", "/api/v1/roles/*"]
+  default     = ["/api/v1/auth*", "/api/v1/users*", "/api/v1/admin*", "/api/v1/shippers*", "/api/v1/permissions*", "/api/v1/roles*"]
 }
 
 variable "cors_allowed_origins" {
