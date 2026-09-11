@@ -317,6 +317,9 @@ func toProtoUser(u *models.User, access map[authctx.Product]authctx.ProductAcces
 	if u.CompanyID != nil {
 		out.CompanyId = u.CompanyID.String()
 	}
+	if u.Company != nil && u.Company.FMSTenantID != nil {
+		out.FmsTenantId = *u.Company.FMSTenantID
+	}
 	return out
 }
 

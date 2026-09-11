@@ -156,6 +156,15 @@ type Company struct {
 	// its sequence, not from these codes.
 	Abbreviation *string `gorm:"column:abbreviation" json:"abbreviation,omitempty"`
 
+	// FMSTenantID is fms_app.tenants.id for a company that came from FMS.
+	//
+	// FMS is bigint-keyed end to end and its row-level security compares
+	// every query against this value, so it rides in the access token and
+	// FMS sets app.current_tenant from it directly. One primary key here,
+	// one recorded alias, nobody translating at runtime. NULL for every
+	// company that never was an FMS tenant.
+	FMSTenantID *int64 `gorm:"column:fms_tenant_id" json:"fmsTenantId,omitempty"`
+
 	NPWP           *string `gorm:"column:npwp" json:"npwp,omitempty"`
 	Address        *string `json:"address,omitempty"`
 	CityID         *string `gorm:"column:city_id" json:"cityId,omitempty"`
@@ -289,6 +298,12 @@ type User struct {
 	// rather than an administrator of one, so it does not belong in a
 	// per-product table.
 	IsPlatformStaff bool `gorm:"not null;default:false" json:"isPlatformStaff"`
+
+	// FMSUserID is fms_app.users.id for a person who came from FMS. FMS rows
+	// that name a person (dashboard layouts, API token authors, report
+	// owners) key on it, so it rides in the token next to the tenant alias.
+	// NULL for everyone who never had an FMS login.
+	FMSUserID *int64 `gorm:"column:fms_user_id" json:"fmsUserId,omitempty"`
 
 	// RoleID is how this person's access is granted. Every account in a company
 	// has one; only platform staff, who belong to no company, do not.

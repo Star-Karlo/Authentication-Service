@@ -249,6 +249,12 @@ func (s *AuthService) mintAccessToken(ctx context.Context, user *models.User, to
 	if user.CompanyID != nil {
 		principal.CompanyID = user.CompanyID.String()
 	}
+	if user.Company != nil && user.Company.FMSTenantID != nil {
+		principal.FMSTenantID = *user.Company.FMSTenantID
+	}
+	if user.FMSUserID != nil {
+		principal.FMSUserID = *user.FMSUserID
+	}
 
 	// The per-product access map: which products this person may use, in what
 	// role, with which permissions, and what their company is entitled to in

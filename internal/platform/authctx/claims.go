@@ -27,8 +27,16 @@ type Principal struct {
 	// CompanyID is the shared IAM's identifier for the tenant.
 	CompanyID string `json:"cid"`
 
-	// FMSTenantID is gone. FMS authenticates here now, so there is no separate
-	// FMS identity to alias — one company, one id, both products.
+	// FMSTenantID is the company's fms_app.tenants.id, for companies that came
+	// from FMS. Login happens here, but FMS's data plane is bigint-keyed and
+	// its row-level security compares against this value on every query, so
+	// the alias travels in the token rather than being looked up per request.
+	// Zero for every company that was never an FMS tenant.
+	FMSTenantID int64 `json:"ftid,omitempty"`
+
+	// FMSUserID is the person's fms_app.users.id, for the same reason: FMS
+	// rows that name a person key on it. Zero when they never had an FMS login.
+	FMSUserID int64 `json:"fuid,omitempty"`
 
 	// IsPlatformStaff marks a Karlo employee, who administers across tenants
 	// and bypasses company entitlement entirely.
