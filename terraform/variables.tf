@@ -53,11 +53,6 @@ variable "min_capacity" {
   default = 1
 }
 
-variable "tasks_in_public_subnets" {
-  description = "Must match the platform's setting of the same name."
-  type        = bool
-  default     = false
-}
 
 variable "max_capacity" {
   type    = number
