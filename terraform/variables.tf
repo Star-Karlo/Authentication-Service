@@ -145,14 +145,4 @@ variable "extra_environment" {
   default     = []
 }
 
-variable "secrets" {
-  description = "Secrets injected by the ECS agent at task start."
-  type        = list(object({ name = string, valueFrom = string }))
-  default     = []
-}
 
-variable "secret_arns" {
-  description = "The secrets the execution role may read. Enumerated, never wildcarded."
-  type        = list(string)
-  default     = []
-}

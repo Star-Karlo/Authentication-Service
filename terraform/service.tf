@@ -59,7 +59,7 @@ resource "aws_ecs_task_definition" "main" {
 
       # Secrets are injected by the ECS agent at start, so they never appear in
       # the task definition — which is readable by anyone with console access.
-      secrets = var.secrets
+      secrets = local.secrets
 
       logConfiguration = {
         logDriver = "awslogs"
@@ -162,9 +162,15 @@ resource "aws_lb_target_group" "main" {
   tags = { Name = local.name }
 }
 
+# One rule per five paths. An ALB rule accepts at most five condition values,
+# and this service claims more than that; a single rule fails validation.
+# Priorities are consecutive from listener_priority, which is why the
+# services' priorities are spaced a hundred apart.
 resource "aws_lb_listener_rule" "main" {
+  for_each = { for i, chunk in chunklist(var.path_patterns, 5) : i => chunk }
+
   listener_arn = local.platform.alb_https_listener_arn
-  priority     = var.listener_priority
+  priority     = var.listener_priority + each.key
 
   action {
     type             = "forward"
@@ -173,11 +179,11 @@ resource "aws_lb_listener_rule" "main" {
 
   condition {
     path_pattern {
-      values = var.path_patterns
+      values = each.value
     }
   }
 
-  tags = { Name = local.name }
+  tags = { Name = "${local.name}-${each.key}" }
 }
 
 # --- Service discovery ------------------------------------------------------

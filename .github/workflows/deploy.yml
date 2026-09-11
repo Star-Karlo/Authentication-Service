@@ -1,0 +1,93 @@
+# Build, push, deploy — on every push to main.
+#
+# This replaces CodePipeline, which cannot read from GitHub in ap-southeast-3.
+# Authentication is OIDC: no AWS access key is stored anywhere in GitHub. The
+# role's trust policy names this repository and this branch, so a workflow
+# running anywhere else — a fork, a feature branch — is refused by AWS before
+# it can touch a thing.
+#
+# Set one repository variable: AWS_DEPLOY_ROLE_ARN, from the platform's
+# `github_deploy_role_arn` output.
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # Needed to mint the OIDC token AWS will trust.
+  contents: read
+
+concurrency:
+  # Two pushes in quick succession must not race each other into ECS; the
+  # later one waits, and the service always ends up on the newest commit.
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-southeast-3
+  ECS_CLUSTER: karlo-prod
+  SERVICE_NAME: authentication-service
+  CONTAINER_NAME: authentication-service
+  ECR_REPOSITORY: karlo/authentication-service
+  # The task definition family Terraform registered. Not derivable from the
+  # service name — the families are abbreviated — so it is stated.
+  TASK_FAMILY: karlo-prod-auth
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assume the deploy role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Tagged by commit, never "latest": a tag must always mean the same
+      # image, or a rollback cannot name what to roll back to. The repository
+      # is IMMUTABLE for the same reason.
+      - name: Build and push
+        id: build
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          IMAGE="$REGISTRY/$ECR_REPOSITORY:sha-${GITHUB_SHA::12}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      # The task definition is owned by Terraform, which ignores changes to its
+      # container definitions precisely so this step can swap the image without
+      # the next terraform apply rolling it back.
+      - name: Fetch the current task definition
+        run: |
+          aws ecs describe-task-definition --task-definition "$TASK_FAMILY" \
+            --query taskDefinition > task-def.json
+
+      - uses: aws-actions/amazon-ecs-render-task-definition@v1
+        id: render
+        with:
+          task-definition: task-def.json
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ steps.build.outputs.image }}
+
+      - name: Deploy and wait for the rollout
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render.outputs.task-definition }}
+          service: ${{ env.SERVICE_NAME }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          # Fails the job if the new tasks never become healthy, which is what
+          # makes a bad deploy visible on the commit rather than in a dashboard.
+          wait-for-service-stability: true

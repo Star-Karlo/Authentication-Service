@@ -39,18 +39,7 @@ extra_environment = [
 
 # This service is the only holder of the JWT private key. No other service is
 # granted it.
-secrets = [
-  { name = "DB_HOST", valueFrom = "SECRET_RDS:host::" },
-  { name = "DB_USER", valueFrom = "SECRET_RDS:username::" },
-  { name = "DB_PASSWORD", valueFrom = "SECRET_RDS:password::" },
-  { name = "JWT_PRIVATE_KEY", valueFrom = "SECRET_JWT_PRIVATE" },
-  { name = "JWT_PUBLIC_KEY", valueFrom = "SECRET_JWT_PUBLIC" },
-  { name = "SERVICE_TOKEN", valueFrom = "SECRET_TOKENS:authentication-service::" },
-  { name = "ACCEPTED_SERVICE_TOKENS", valueFrom = "SECRET_TOKENS:all::" },
-]
 
-secret_arns = ["SECRET_RDS", "SECRET_JWT_PRIVATE", "SECRET_JWT_PUBLIC", "SECRET_TOKENS"]
 
-# The SECRET_* placeholders are Secrets Manager ARNs from platform-terraform's
 # `secret_arns` output. Copy this file to prod.tfvars and substitute them; the
 # copy is gitignored because the ARNs name where production credentials live.
