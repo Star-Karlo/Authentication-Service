@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/karlo/authentication-service/internal/platform/bootstrap"
 	"github.com/karlo/authentication-service/internal/platform/dbmigrate"
 	"log/slog"
 	"net/http"
@@ -159,6 +160,17 @@ func run() error {
 
 	authService := services.NewAuthService(userRepo, sessionRepo, apiKeyRepo, deviceRepo, moduleRepo, accessRepo, auditRepo, signer, cacheClient, cfg)
 	userService := services.NewUserService(userRepo, roleRepo, companyRepo, moduleRepo, accessRepo, sessionRepo, auditRepo, authService)
+
+	// `server bootstrap`: create the first platform administrator and exit.
+	// Sits here, after the services exist, because it reuses Register rather
+	// than reimplementing password hashing and role assignment.
+	if slices.Contains(os.Args[1:], "bootstrap") {
+		return bootstrap.Run(context.Background(), bootstrap.Deps{
+			Users:     userRepo,
+			Companies: companyRepo,
+			Register:  userService.Register,
+		})
+	}
 	entitlementService := services.NewEntitlementService(moduleRepo, companyRepo, auditRepo)
 	if revocationStore != nil {
 		entitlementService.SetAnnouncer(revocationStore)

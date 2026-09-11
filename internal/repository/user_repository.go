@@ -279,3 +279,16 @@ func (r *UserRepository) SetRole(ctx context.Context, userID, roleID uuid.UUID) 
 	}
 	return nil
 }
+
+// CountPlatformStaff reports how many live platform-staff accounts exist.
+//
+// The bootstrap command's only guard: a non-zero count means the environment
+// already has an administrator, and a second must be created by that person
+// through the product, never from a shell.
+func (r *UserRepository) CountPlatformStaff(ctx context.Context) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&models.User{}).
+		Where("is_platform_staff = TRUE AND deleted_at IS NULL").
+		Count(&n).Error
+	return n, err
+}
