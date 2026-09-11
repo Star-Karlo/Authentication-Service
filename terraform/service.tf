@@ -195,6 +195,32 @@ resource "aws_lb_listener_rule" "main" {
   tags = { Name = "${local.name}-${each.key}" }
 }
 
+# The service's own public name: authentication-api.karlo.id and so on.
+#
+# A host-header rule on the HTTPS listener, so a request arriving under this
+# name reaches this service whatever its path — including one that names a
+# path another service owns, which then 404s here rather than being answered
+# by a service the caller did not address. Evaluated BEFORE the path rules
+# (lower number) for exactly that reason. Only on 443: CloudFront arrives on
+# 80 under the console's name, where the path rules are the right ones.
+resource "aws_lb_listener_rule" "host" {
+  listener_arn = local.platform.alb_listener_arns.https
+  priority     = var.listener_priority - 50
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.main.arn
+  }
+
+  condition {
+    host_header {
+      values = [local.platform.api_hostnames[var.service_name]]
+    }
+  }
+
+  tags = { Name = "${local.name}-host" }
+}
+
 # --- Service discovery ------------------------------------------------------
 
 resource "aws_service_discovery_service" "main" {
