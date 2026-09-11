@@ -99,6 +99,12 @@ jobs:
       # On a fresh environment it also creates the database. A failed
       # migration stops the deploy here, so the running service never sees a
       # schema its code was not built for.
+      #
+      # The override is ["migrate"], not ["server","migrate"]: the image's
+      # ENTRYPOINT is already the binary, and ECS appends the override to it.
+      # With the binary named twice, os.Args[1] was "server" and the
+      # migration branch was never taken — the task just started the service
+      # against a database that did not exist yet.
       - name: Run migrations
         run: |
           NET=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$SERVICE_NAME" \
@@ -106,7 +112,7 @@ jobs:
           TASK=$(aws ecs run-task --cluster "$ECS_CLUSTER" --launch-type FARGATE \
                 --task-definition "${{ steps.register.outputs.arn }}" \
                 --network-configuration "{\"awsvpcConfiguration\":$NET}" \
-                --overrides "{\"containerOverrides\":[{\"name\":\"$CONTAINER_NAME\",\"command\":[\"server\",\"migrate\"]}]}" \
+                --overrides "{\"containerOverrides\":[{\"name\":\"$CONTAINER_NAME\",\"command\":[\"migrate\"]}]}" \
                 --query 'tasks[0].taskArn' --output text)
           echo "migration task: $TASK"
           aws ecs wait tasks-stopped --cluster "$ECS_CLUSTER" --tasks "$TASK"

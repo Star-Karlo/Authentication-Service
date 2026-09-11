@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 	"time"
 
@@ -62,7 +63,11 @@ func run() error {
 	// ECS task from the same image and secrets as the service, which is the
 	// only place RDS can be reached from. Exits non-zero on failure so the
 	// task — and whatever invoked it — sees the failure.
-	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+	// Matched anywhere in the arguments, not only at [1]: an ECS command
+	// override is appended to the image's ENTRYPOINT, so a caller that names
+	// the binary again puts "migrate" at [2]. Reading only [1] made that a
+	// silent no-op — the task started the server instead of migrating.
+	if slices.Contains(os.Args[1:], "migrate") {
 		// /migrations is where the Dockerfile puts them. Overridable so the
 		// same command works from a checkout, where they are ./migrations.
 		dir := os.Getenv("MIGRATIONS_DIR")
