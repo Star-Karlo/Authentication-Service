@@ -12,7 +12,7 @@ terraform {
   # cannot apply the same service at once. The key is namespaced by service and
   # environment; the bucket and lock table are created by platform-terraform.
   backend "s3" {
-    bucket         = "karlo-terraform-state"
+    bucket         = "karlo-terraform-state-057114645059"
     key            = "authentication-service/terraform.tfstate"
     region         = "ap-southeast-3"
     dynamodb_table = "karlo-terraform-locks"
@@ -41,7 +41,7 @@ data "terraform_remote_state" "platform" {
   backend = "s3"
 
   config = {
-    bucket = "karlo-terraform-state"
+    bucket = "karlo-terraform-state-057114645059"
     key    = "platform/terraform.tfstate"
     region = var.region
   }
