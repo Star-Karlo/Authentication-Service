@@ -36,11 +36,7 @@ func (r *AccessRepository) WithTx(tx *gorm.DB) *AccessRepository {
 // "this person only uses FMS" is expressed.
 func (r *AccessRepository) BuildAccess(ctx context.Context, userID uuid.UUID, companyID *uuid.UUID) (map[authctx.Product]authctx.ProductAccess, error) {
 	// The role first: it carries the job, and may carry everything.
-	var role struct {
-		Name        string
-		GrantsAll   bool
-		Permissions pq.StringArray `gorm:"type:text[]"`
-	}
+	var role accessRole
 	err := r.db.WithContext(ctx).
 		Table("users u").
 		Select("r.name, r.grants_all, r.permissions").
@@ -52,10 +48,7 @@ func (r *AccessRepository) BuildAccess(ctx context.Context, userID uuid.UUID, co
 	}
 
 	// Then the per-person extras, which only ever ADD.
-	var extras []struct {
-		Product     string
-		Permissions pq.StringArray `gorm:"type:text[]"`
-	}
+	var extras []accessExtra
 	err = r.db.WithContext(ctx).
 		Table("user_product_access").
 		Select("product, permissions").
@@ -65,9 +58,42 @@ func (r *AccessRepository) BuildAccess(ctx context.Context, userID uuid.UUID, co
 		return nil, fmt.Errorf("repository: load extra access: %w", err)
 	}
 
+	return r.assemble(ctx, role, extras, companyID)
+}
+
+// BuildAccessForRole is BuildAccess for a machine credential: an API key
+// that names a role and no person. The role and the company's entitlement
+// decide everything; there are no per-person extras, because there is no
+// person.
+func (r *AccessRepository) BuildAccessForRole(ctx context.Context, roleID uuid.UUID, companyID *uuid.UUID) (map[authctx.Product]authctx.ProductAccess, error) {
+	var role accessRole
+	err := r.db.WithContext(ctx).
+		Table("roles").
+		Select("name, grants_all, permissions").
+		Where("id = ?", roleID).
+		Scan(&role).Error
+	if err != nil {
+		return nil, fmt.Errorf("repository: load role: %w", err)
+	}
+	return r.assemble(ctx, role, nil, companyID)
+}
+
+type accessRole struct {
+	Name        string
+	GrantsAll   bool
+	Permissions pq.StringArray `gorm:"type:text[]"`
+}
+
+type accessExtra struct {
+	Product     string
+	Permissions pq.StringArray `gorm:"type:text[]"`
+}
+
+func (r *AccessRepository) assemble(ctx context.Context, role accessRole, extras []accessExtra, companyID *uuid.UUID) (map[authctx.Product]authctx.ProductAccess, error) {
 	// Entitlement: what the company actually bought.
 	features := map[string][]string{}
 	if companyID != nil {
+		var err error
 		features, err = entitlementFor(ctx, r.db, *companyID)
 		if err != nil {
 			return nil, err

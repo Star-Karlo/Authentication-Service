@@ -401,11 +401,15 @@ type APIKey struct {
 	ID   uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
 	Name string    `gorm:"not null" json:"name"`
 	// KeyHash is SHA-256 hex. The plaintext key is returned once, at creation.
-	KeyHash   string      `gorm:"column:key_hash;not null;uniqueIndex" json:"-"`
-	KeyPrefix string      `gorm:"column:key_prefix;not null" json:"keyPrefix"`
-	UserID    *uuid.UUID  `gorm:"type:uuid" json:"userId,omitempty"`
-	CompanyID *uuid.UUID  `gorm:"type:uuid" json:"companyId,omitempty"`
-	Scopes    StringArray `gorm:"type:text[]" json:"scopes"`
+	KeyHash   string     `gorm:"column:key_hash;not null;uniqueIndex" json:"-"`
+	KeyPrefix string     `gorm:"column:key_prefix;not null" json:"keyPrefix"`
+	UserID    *uuid.UUID `gorm:"type:uuid" json:"userId,omitempty"`
+	CompanyID *uuid.UUID `gorm:"type:uuid" json:"companyId,omitempty"`
+	// RoleID is what a key may do, since 000006. A key with a role and no
+	// user is a machine credential: it acts for the company in that role,
+	// and nobody's departure revokes it by accident.
+	RoleID *uuid.UUID  `gorm:"column:role_id;type:uuid" json:"roleId,omitempty"`
+	Scopes StringArray `gorm:"type:text[]" json:"scopes"`
 
 	IsActive   bool       `gorm:"not null;default:true" json:"isActive"`
 	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`

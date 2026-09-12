@@ -275,6 +275,15 @@ func (r *APIKeyRepository) FindByHash(ctx context.Context, hash string) (*models
 	return one(&k, r.db.WithContext(ctx).First(&k, "key_hash = ?", hash).Error)
 }
 
+// CompanyOf loads the company a key acts for, for the identity it presents.
+func (r *APIKeyRepository) CompanyOf(ctx context.Context, k *models.APIKey) (*models.Company, error) {
+	if k.CompanyID == nil {
+		return nil, nil
+	}
+	var c models.Company
+	return one(&c, r.db.WithContext(ctx).First(&c, "id = ?", *k.CompanyID).Error)
+}
+
 func (r *APIKeyRepository) Create(ctx context.Context, k *models.APIKey) error {
 	if err := r.db.WithContext(ctx).Create(k).Error; err != nil {
 		return fmt.Errorf("repository: create api key: %w", err)

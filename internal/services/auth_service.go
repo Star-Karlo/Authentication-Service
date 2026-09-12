@@ -396,6 +396,56 @@ func (s *AuthService) ValidateToken(ctx context.Context, token string) (authctx.
 	return principal, user, nil
 }
 
+// validateMachineKey settles a key that names a role and no person — the
+// shape 000006 introduced and the shape every FMS integration key has.
+//
+// It acts AS THE COMPANY in that role: the principal's UserID is the key's
+// own id, so an audit trail still says which credential did it, and its
+// access is the role intersected with the company's entitlement, exactly as
+// a person's would be. A key with neither a user nor a role can do nothing
+// and is refused.
+func (s *AuthService) validateMachineKey(ctx context.Context, apiKey *models.APIKey) (authctx.Principal, *models.User, error) {
+	if apiKey.RoleID == nil || apiKey.CompanyID == nil {
+		return authctx.Principal{}, nil, ErrTokenInvalid
+	}
+	company, err := s.apiKeys.CompanyOf(ctx, apiKey)
+	if err != nil {
+		return authctx.Principal{}, nil, ErrTokenInvalid
+	}
+	if company.IsSuspended {
+		return authctx.Principal{}, nil, ErrAccountSuspended
+	}
+
+	access, err := s.access.BuildAccessForRole(ctx, *apiKey.RoleID, apiKey.CompanyID)
+	if err != nil {
+		return authctx.Principal{}, nil, fmt.Errorf("resolve product access: %w", err)
+	}
+
+	s.apiKeys.TouchLastUsed(ctx, apiKey.ID)
+
+	principal := authctx.Principal{
+		UserID:    apiKey.ID.String(),
+		CompanyID: apiKey.CompanyID.String(),
+		Access:    access,
+	}
+	if company.FMSTenantID != nil {
+		principal.FMSTenantID = *company.FMSTenantID
+	}
+
+	// A stand-in user record, so callers that describe "who" — the gRPC
+	// ValidateToken response — have something truthful to describe: the
+	// key, by name, in its company.
+	name := apiKey.Name
+	stand := &models.User{
+		ID:        apiKey.ID,
+		FullName:  &name,
+		CompanyID: apiKey.CompanyID,
+		Company:   company,
+		RoleID:    apiKey.RoleID,
+	}
+	return principal, stand, nil
+}
+
 func (s *AuthService) validateAPIKey(ctx context.Context, key string) (authctx.Principal, *models.User, error) {
 	apiKey, err := s.apiKeys.FindByHash(ctx, hashToken(key))
 	if err != nil {
@@ -405,7 +455,7 @@ func (s *AuthService) validateAPIKey(ctx context.Context, key string) (authctx.P
 		return authctx.Principal{}, nil, ErrTokenInvalid
 	}
 	if apiKey.UserID == nil {
-		return authctx.Principal{}, nil, ErrTokenInvalid
+		return s.validateMachineKey(ctx, apiKey)
 	}
 
 	user, err := s.users.FindByID(ctx, *apiKey.UserID)
