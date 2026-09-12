@@ -31,6 +31,11 @@ service AuthService {
   // GetCompany resolves a company together with the settings business rules read.
   rpc GetCompany(GetCompanyRequest) returns (GetCompanyResponse);
 
+  // ListCompanies pages the platform's companies, for a service that keeps a
+  // projection of them — FMS refreshes its tenants cache from this. Service
+  // credential only; there is no user behind a background loop.
+  rpc ListCompanies(ListCompaniesRequest) returns (ListCompaniesResponse);
+
   // ListCompanyMembers returns the users belonging to a company, optionally
   // narrowed to a role. Used to resolve notification audiences such as
   // "all warehouse PICs of this shipper".
@@ -123,6 +128,14 @@ message Company {
   // AGR-<transporter>-<client>-000001. Derived from the name and editable.
   // Not unique — the sequence is what makes the number unique.
   string abbreviation = 8;
+  // fms_tenant_id is the company's FMS-facing bigint alias; 0 when the
+  // company was never sold FMS.
+  int64 fms_tenant_id = 9;
+  // legal_name is what a document prints; empty falls back to name.
+  string legal_name = 10;
+  string slug = 11;
+  bool is_suspended = 12;
+  google.protobuf.Timestamp updated_at = 13;
 }
 
 // CompanySettings carries the per-company business toggles the legacy
@@ -193,6 +206,22 @@ message GetCompanyRequest {
 
 message GetCompanyResponse {
   Company company = 1;
+}
+
+message ListCompaniesRequest {
+  // page is zero-based; page_size defaults to 100 and is capped at 500.
+  int32 page = 1;
+  int32 page_size = 2;
+  // only_fms restricts the result to companies that have an FMS tenant id.
+  bool only_fms = 3;
+  // updated_since, when set, returns only companies changed at or after it —
+  // what an incremental refresh wants.
+  google.protobuf.Timestamp updated_since = 4;
+}
+
+message ListCompaniesResponse {
+  repeated Company companies = 1;
+  int64 total = 2;
 }
 
 message ListCompanyMembersRequest {

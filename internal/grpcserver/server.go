@@ -5,6 +5,7 @@ package grpcserver
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/karlo/authentication-service/internal/models"
@@ -161,6 +162,35 @@ func (s *Server) GetCompany(ctx context.Context, req *authv1.GetCompanyRequest) 
 	}
 
 	return &authv1.GetCompanyResponse{Company: toProtoCompany(company)}, nil
+}
+
+func (s *Server) ListCompanies(ctx context.Context, req *authv1.ListCompaniesRequest) (*authv1.ListCompaniesResponse, error) {
+	page := int(req.GetPage())
+	if page < 0 {
+		page = 0
+	}
+	size := int(req.GetPageSize())
+	if size <= 0 {
+		size = 100
+	}
+	if size > 500 {
+		size = 500
+	}
+	var since *time.Time
+	if req.GetUpdatedSince() != nil {
+		t := req.GetUpdatedSince().AsTime()
+		since = &t
+	}
+
+	companies, total, err := s.companies.ListForSync(ctx, page, size, req.GetOnlyFms(), since)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to list companies")
+	}
+	out := &authv1.ListCompaniesResponse{Total: total, Companies: make([]*authv1.Company, 0, len(companies))}
+	for i := range companies {
+		out.Companies = append(out.Companies, toProtoCompany(&companies[i]))
+	}
+	return out, nil
 }
 
 func (s *Server) ListCompanyMembers(ctx context.Context, req *authv1.ListCompanyMembersRequest) (*authv1.ListCompanyMembersResponse, error) {
@@ -332,6 +362,11 @@ func toProtoCompany(c *models.Company) *authv1.Company {
 		Name:         c.Name,
 		Role:         c.Role,
 		Abbreviation: deref(c.Abbreviation),
+		LegalName:    deref(c.LegalName),
+		Slug:         deref(c.Slug),
+		IsSuspended:  c.IsSuspended,
+		FmsTenantId:  derefInt64(c.FMSTenantID),
+		UpdatedAt:    timestamppb.New(c.UpdatedAt),
 		Npwp:         deref(c.NPWP),
 		Address:      deref(c.Address),
 		Settings: &authv1.CompanySettings{
@@ -366,4 +401,11 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+func derefInt64(p *int64) int64 {
+	if p == nil {
+		return 0
+	}
+	return *p
 }

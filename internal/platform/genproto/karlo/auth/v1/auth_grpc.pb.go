@@ -24,6 +24,7 @@ const (
 	AuthService_GetUsers_FullMethodName               = "/karlo.auth.v1.AuthService/GetUsers"
 	AuthService_CheckPermission_FullMethodName        = "/karlo.auth.v1.AuthService/CheckPermission"
 	AuthService_GetCompany_FullMethodName             = "/karlo.auth.v1.AuthService/GetCompany"
+	AuthService_ListCompanies_FullMethodName          = "/karlo.auth.v1.AuthService/ListCompanies"
 	AuthService_ListCompanyMembers_FullMethodName     = "/karlo.auth.v1.AuthService/ListCompanyMembers"
 	AuthService_ResolveDeliveryTargets_FullMethodName = "/karlo.auth.v1.AuthService/ResolveDeliveryTargets"
 )
@@ -53,6 +54,10 @@ type AuthServiceClient interface {
 	CheckPermission(ctx context.Context, in *CheckPermissionRequest, opts ...grpc.CallOption) (*CheckPermissionResponse, error)
 	// GetCompany resolves a company together with the settings business rules read.
 	GetCompany(ctx context.Context, in *GetCompanyRequest, opts ...grpc.CallOption) (*GetCompanyResponse, error)
+	// ListCompanies pages the platform's companies, for a service that keeps a
+	// projection of them — FMS refreshes its tenants cache from this. Service
+	// credential only; there is no user behind a background loop.
+	ListCompanies(ctx context.Context, in *ListCompaniesRequest, opts ...grpc.CallOption) (*ListCompaniesResponse, error)
 	// ListCompanyMembers returns the users belonging to a company, optionally
 	// narrowed to a role. Used to resolve notification audiences such as
 	// "all warehouse PICs of this shipper".
@@ -121,6 +126,16 @@ func (c *authServiceClient) GetCompany(ctx context.Context, in *GetCompanyReques
 	return out, nil
 }
 
+func (c *authServiceClient) ListCompanies(ctx context.Context, in *ListCompaniesRequest, opts ...grpc.CallOption) (*ListCompaniesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListCompaniesResponse)
+	err := c.cc.Invoke(ctx, AuthService_ListCompanies_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *authServiceClient) ListCompanyMembers(ctx context.Context, in *ListCompanyMembersRequest, opts ...grpc.CallOption) (*ListCompanyMembersResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListCompanyMembersResponse)
@@ -166,6 +181,10 @@ type AuthServiceServer interface {
 	CheckPermission(context.Context, *CheckPermissionRequest) (*CheckPermissionResponse, error)
 	// GetCompany resolves a company together with the settings business rules read.
 	GetCompany(context.Context, *GetCompanyRequest) (*GetCompanyResponse, error)
+	// ListCompanies pages the platform's companies, for a service that keeps a
+	// projection of them — FMS refreshes its tenants cache from this. Service
+	// credential only; there is no user behind a background loop.
+	ListCompanies(context.Context, *ListCompaniesRequest) (*ListCompaniesResponse, error)
 	// ListCompanyMembers returns the users belonging to a company, optionally
 	// narrowed to a role. Used to resolve notification audiences such as
 	// "all warehouse PICs of this shipper".
@@ -198,6 +217,9 @@ func (UnimplementedAuthServiceServer) CheckPermission(context.Context, *CheckPer
 }
 func (UnimplementedAuthServiceServer) GetCompany(context.Context, *GetCompanyRequest) (*GetCompanyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetCompany not implemented")
+}
+func (UnimplementedAuthServiceServer) ListCompanies(context.Context, *ListCompaniesRequest) (*ListCompaniesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListCompanies not implemented")
 }
 func (UnimplementedAuthServiceServer) ListCompanyMembers(context.Context, *ListCompanyMembersRequest) (*ListCompanyMembersResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListCompanyMembers not implemented")
@@ -316,6 +338,24 @@ func _AuthService_GetCompany_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AuthService_ListCompanies_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListCompaniesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).ListCompanies(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_ListCompanies_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).ListCompanies(ctx, req.(*ListCompaniesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AuthService_ListCompanyMembers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListCompanyMembersRequest)
 	if err := dec(in); err != nil {
@@ -378,6 +418,10 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetCompany",
 			Handler:    _AuthService_GetCompany_Handler,
+		},
+		{
+			MethodName: "ListCompanies",
+			Handler:    _AuthService_ListCompanies_Handler,
 		},
 		{
 			MethodName: "ListCompanyMembers",

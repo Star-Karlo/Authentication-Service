@@ -418,7 +418,15 @@ type Company struct {
 	// The short code that appears in agreement numbers:
 	// AGR-<transporter>-<client>-000001. Derived from the name and editable.
 	// Not unique — the sequence is what makes the number unique.
-	Abbreviation  string `protobuf:"bytes,8,opt,name=abbreviation,proto3" json:"abbreviation,omitempty"`
+	Abbreviation string `protobuf:"bytes,8,opt,name=abbreviation,proto3" json:"abbreviation,omitempty"`
+	// fms_tenant_id is the company's FMS-facing bigint alias; 0 when the
+	// company was never sold FMS.
+	FmsTenantId int64 `protobuf:"varint,9,opt,name=fms_tenant_id,json=fmsTenantId,proto3" json:"fms_tenant_id,omitempty"`
+	// legal_name is what a document prints; empty falls back to name.
+	LegalName     string                 `protobuf:"bytes,10,opt,name=legal_name,json=legalName,proto3" json:"legal_name,omitempty"`
+	Slug          string                 `protobuf:"bytes,11,opt,name=slug,proto3" json:"slug,omitempty"`
+	IsSuspended   bool                   `protobuf:"varint,12,opt,name=is_suspended,json=isSuspended,proto3" json:"is_suspended,omitempty"`
+	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -507,6 +515,41 @@ func (x *Company) GetAbbreviation() string {
 		return x.Abbreviation
 	}
 	return ""
+}
+
+func (x *Company) GetFmsTenantId() int64 {
+	if x != nil {
+		return x.FmsTenantId
+	}
+	return 0
+}
+
+func (x *Company) GetLegalName() string {
+	if x != nil {
+		return x.LegalName
+	}
+	return ""
+}
+
+func (x *Company) GetSlug() string {
+	if x != nil {
+		return x.Slug
+	}
+	return ""
+}
+
+func (x *Company) GetIsSuspended() bool {
+	if x != nil {
+		return x.IsSuspended
+	}
+	return false
+}
+
+func (x *Company) GetUpdatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return nil
 }
 
 // CompanySettings carries the per-company business toggles the legacy
@@ -1111,6 +1154,130 @@ func (x *GetCompanyResponse) GetCompany() *Company {
 	return nil
 }
 
+type ListCompaniesRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// page is zero-based; page_size defaults to 100 and is capped at 500.
+	Page     int32 `protobuf:"varint,1,opt,name=page,proto3" json:"page,omitempty"`
+	PageSize int32 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	// only_fms restricts the result to companies that have an FMS tenant id.
+	OnlyFms bool `protobuf:"varint,3,opt,name=only_fms,json=onlyFms,proto3" json:"only_fms,omitempty"`
+	// updated_since, when set, returns only companies changed at or after it —
+	// what an incremental refresh wants.
+	UpdatedSince  *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=updated_since,json=updatedSince,proto3" json:"updated_since,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListCompaniesRequest) Reset() {
+	*x = ListCompaniesRequest{}
+	mi := &file_karlo_auth_v1_auth_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListCompaniesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListCompaniesRequest) ProtoMessage() {}
+
+func (x *ListCompaniesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_karlo_auth_v1_auth_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListCompaniesRequest.ProtoReflect.Descriptor instead.
+func (*ListCompaniesRequest) Descriptor() ([]byte, []int) {
+	return file_karlo_auth_v1_auth_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *ListCompaniesRequest) GetPage() int32 {
+	if x != nil {
+		return x.Page
+	}
+	return 0
+}
+
+func (x *ListCompaniesRequest) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *ListCompaniesRequest) GetOnlyFms() bool {
+	if x != nil {
+		return x.OnlyFms
+	}
+	return false
+}
+
+func (x *ListCompaniesRequest) GetUpdatedSince() *timestamppb.Timestamp {
+	if x != nil {
+		return x.UpdatedSince
+	}
+	return nil
+}
+
+type ListCompaniesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Companies     []*Company             `protobuf:"bytes,1,rep,name=companies,proto3" json:"companies,omitempty"`
+	Total         int64                  `protobuf:"varint,2,opt,name=total,proto3" json:"total,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListCompaniesResponse) Reset() {
+	*x = ListCompaniesResponse{}
+	mi := &file_karlo_auth_v1_auth_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListCompaniesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListCompaniesResponse) ProtoMessage() {}
+
+func (x *ListCompaniesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_karlo_auth_v1_auth_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListCompaniesResponse.ProtoReflect.Descriptor instead.
+func (*ListCompaniesResponse) Descriptor() ([]byte, []int) {
+	return file_karlo_auth_v1_auth_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *ListCompaniesResponse) GetCompanies() []*Company {
+	if x != nil {
+		return x.Companies
+	}
+	return nil
+}
+
+func (x *ListCompaniesResponse) GetTotal() int64 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
 type ListCompanyMembersRequest struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	CompanyId string                 `protobuf:"bytes,1,opt,name=company_id,json=companyId,proto3" json:"company_id,omitempty"`
@@ -1123,7 +1290,7 @@ type ListCompanyMembersRequest struct {
 
 func (x *ListCompanyMembersRequest) Reset() {
 	*x = ListCompanyMembersRequest{}
-	mi := &file_karlo_auth_v1_auth_proto_msgTypes[15]
+	mi := &file_karlo_auth_v1_auth_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1135,7 +1302,7 @@ func (x *ListCompanyMembersRequest) String() string {
 func (*ListCompanyMembersRequest) ProtoMessage() {}
 
 func (x *ListCompanyMembersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_karlo_auth_v1_auth_proto_msgTypes[15]
+	mi := &file_karlo_auth_v1_auth_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1148,7 +1315,7 @@ func (x *ListCompanyMembersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCompanyMembersRequest.ProtoReflect.Descriptor instead.
 func (*ListCompanyMembersRequest) Descriptor() ([]byte, []int) {
-	return file_karlo_auth_v1_auth_proto_rawDescGZIP(), []int{15}
+	return file_karlo_auth_v1_auth_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ListCompanyMembersRequest) GetCompanyId() string {
@@ -1182,7 +1349,7 @@ type ListCompanyMembersResponse struct {
 
 func (x *ListCompanyMembersResponse) Reset() {
 	*x = ListCompanyMembersResponse{}
-	mi := &file_karlo_auth_v1_auth_proto_msgTypes[16]
+	mi := &file_karlo_auth_v1_auth_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1194,7 +1361,7 @@ func (x *ListCompanyMembersResponse) String() string {
 func (*ListCompanyMembersResponse) ProtoMessage() {}
 
 func (x *ListCompanyMembersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_karlo_auth_v1_auth_proto_msgTypes[16]
+	mi := &file_karlo_auth_v1_auth_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1207,7 +1374,7 @@ func (x *ListCompanyMembersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCompanyMembersResponse.ProtoReflect.Descriptor instead.
 func (*ListCompanyMembersResponse) Descriptor() ([]byte, []int) {
-	return file_karlo_auth_v1_auth_proto_rawDescGZIP(), []int{16}
+	return file_karlo_auth_v1_auth_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ListCompanyMembersResponse) GetUsers() []*User {
@@ -1233,7 +1400,7 @@ type ResolveDeliveryTargetsRequest struct {
 
 func (x *ResolveDeliveryTargetsRequest) Reset() {
 	*x = ResolveDeliveryTargetsRequest{}
-	mi := &file_karlo_auth_v1_auth_proto_msgTypes[17]
+	mi := &file_karlo_auth_v1_auth_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1245,7 +1412,7 @@ func (x *ResolveDeliveryTargetsRequest) String() string {
 func (*ResolveDeliveryTargetsRequest) ProtoMessage() {}
 
 func (x *ResolveDeliveryTargetsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_karlo_auth_v1_auth_proto_msgTypes[17]
+	mi := &file_karlo_auth_v1_auth_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1258,7 +1425,7 @@ func (x *ResolveDeliveryTargetsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveDeliveryTargetsRequest.ProtoReflect.Descriptor instead.
 func (*ResolveDeliveryTargetsRequest) Descriptor() ([]byte, []int) {
-	return file_karlo_auth_v1_auth_proto_rawDescGZIP(), []int{17}
+	return file_karlo_auth_v1_auth_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ResolveDeliveryTargetsRequest) GetUserIds() []string {
@@ -1285,7 +1452,7 @@ type DeliveryTarget struct {
 
 func (x *DeliveryTarget) Reset() {
 	*x = DeliveryTarget{}
-	mi := &file_karlo_auth_v1_auth_proto_msgTypes[18]
+	mi := &file_karlo_auth_v1_auth_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1297,7 +1464,7 @@ func (x *DeliveryTarget) String() string {
 func (*DeliveryTarget) ProtoMessage() {}
 
 func (x *DeliveryTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_karlo_auth_v1_auth_proto_msgTypes[18]
+	mi := &file_karlo_auth_v1_auth_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1310,7 +1477,7 @@ func (x *DeliveryTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeliveryTarget.ProtoReflect.Descriptor instead.
 func (*DeliveryTarget) Descriptor() ([]byte, []int) {
-	return file_karlo_auth_v1_auth_proto_rawDescGZIP(), []int{18}
+	return file_karlo_auth_v1_auth_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *DeliveryTarget) GetUserId() string {
@@ -1364,7 +1531,7 @@ type ResolveDeliveryTargetsResponse struct {
 
 func (x *ResolveDeliveryTargetsResponse) Reset() {
 	*x = ResolveDeliveryTargetsResponse{}
-	mi := &file_karlo_auth_v1_auth_proto_msgTypes[19]
+	mi := &file_karlo_auth_v1_auth_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1376,7 +1543,7 @@ func (x *ResolveDeliveryTargetsResponse) String() string {
 func (*ResolveDeliveryTargetsResponse) ProtoMessage() {}
 
 func (x *ResolveDeliveryTargetsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_karlo_auth_v1_auth_proto_msgTypes[19]
+	mi := &file_karlo_auth_v1_auth_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1389,7 +1556,7 @@ func (x *ResolveDeliveryTargetsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveDeliveryTargetsResponse.ProtoReflect.Descriptor instead.
 func (*ResolveDeliveryTargetsResponse) Descriptor() ([]byte, []int) {
-	return file_karlo_auth_v1_auth_proto_rawDescGZIP(), []int{19}
+	return file_karlo_auth_v1_auth_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ResolveDeliveryTargetsResponse) GetTargets() []*DeliveryTarget {
@@ -1447,7 +1614,7 @@ const file_karlo_auth_v1_auth_proto_rawDesc = "" +
 	"\aactions\x18\x01 \x03(\v2,.karlo.auth.v1.PermissionModule.ActionsEntryR\aactions\x1a:\n" +
 	"\fActionsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"\x8a\x02\n" +
+	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"\xbf\x03\n" +
 	"\aCompany\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -1457,7 +1624,15 @@ const file_karlo_auth_v1_auth_proto_rawDesc = "" +
 	"\bsettings\x18\x06 \x01(\v2\x1e.karlo.auth.v1.CompanySettingsR\bsettings\x129\n" +
 	"\n" +
 	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\"\n" +
-	"\fabbreviation\x18\b \x01(\tR\fabbreviation\"\xb6\x03\n" +
+	"\fabbreviation\x18\b \x01(\tR\fabbreviation\x12\"\n" +
+	"\rfms_tenant_id\x18\t \x01(\x03R\vfmsTenantId\x12\x1d\n" +
+	"\n" +
+	"legal_name\x18\n" +
+	" \x01(\tR\tlegalName\x12\x12\n" +
+	"\x04slug\x18\v \x01(\tR\x04slug\x12!\n" +
+	"\fis_suspended\x18\f \x01(\bR\visSuspended\x129\n" +
+	"\n" +
+	"updated_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\xb6\x03\n" +
 	"\x0fCompanySettings\x120\n" +
 	"\x14cancel_with_validate\x18\x01 \x01(\bR\x12cancelWithValidate\x124\n" +
 	"\x16finish_with_geofencing\x18\x02 \x01(\bR\x14finishWithGeofencing\x12C\n" +
@@ -1493,7 +1668,15 @@ const file_karlo_auth_v1_auth_proto_rawDesc = "" +
 	"\x11GetCompanyRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"F\n" +
 	"\x12GetCompanyResponse\x120\n" +
-	"\acompany\x18\x01 \x01(\v2\x16.karlo.auth.v1.CompanyR\acompany\"~\n" +
+	"\acompany\x18\x01 \x01(\v2\x16.karlo.auth.v1.CompanyR\acompany\"\xa3\x01\n" +
+	"\x14ListCompaniesRequest\x12\x12\n" +
+	"\x04page\x18\x01 \x01(\x05R\x04page\x12\x1b\n" +
+	"\tpage_size\x18\x02 \x01(\x05R\bpageSize\x12\x19\n" +
+	"\bonly_fms\x18\x03 \x01(\bR\aonlyFms\x12?\n" +
+	"\rupdated_since\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\fupdatedSince\"c\n" +
+	"\x15ListCompaniesResponse\x124\n" +
+	"\tcompanies\x18\x01 \x03(\v2\x16.karlo.auth.v1.CompanyR\tcompanies\x12\x14\n" +
+	"\x05total\x18\x02 \x01(\x03R\x05total\"~\n" +
 	"\x19ListCompanyMembersRequest\x12\x1d\n" +
 	"\n" +
 	"company_id\x18\x01 \x01(\tR\tcompanyId\x12\x14\n" +
@@ -1517,14 +1700,15 @@ const file_karlo_auth_v1_auth_proto_rawDesc = "" +
 	"\tTokenKind\x12\x1a\n" +
 	"\x16TOKEN_KIND_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eTOKEN_KIND_JWT\x10\x01\x12\x15\n" +
-	"\x11TOKEN_KIND_STATIC\x10\x022\x97\x05\n" +
+	"\x11TOKEN_KIND_STATIC\x10\x022\xf3\x05\n" +
 	"\vAuthService\x12Z\n" +
 	"\rValidateToken\x12#.karlo.auth.v1.ValidateTokenRequest\x1a$.karlo.auth.v1.ValidateTokenResponse\x12H\n" +
 	"\aGetUser\x12\x1d.karlo.auth.v1.GetUserRequest\x1a\x1e.karlo.auth.v1.GetUserResponse\x12K\n" +
 	"\bGetUsers\x12\x1e.karlo.auth.v1.GetUsersRequest\x1a\x1f.karlo.auth.v1.GetUsersResponse\x12`\n" +
 	"\x0fCheckPermission\x12%.karlo.auth.v1.CheckPermissionRequest\x1a&.karlo.auth.v1.CheckPermissionResponse\x12Q\n" +
 	"\n" +
-	"GetCompany\x12 .karlo.auth.v1.GetCompanyRequest\x1a!.karlo.auth.v1.GetCompanyResponse\x12i\n" +
+	"GetCompany\x12 .karlo.auth.v1.GetCompanyRequest\x1a!.karlo.auth.v1.GetCompanyResponse\x12Z\n" +
+	"\rListCompanies\x12#.karlo.auth.v1.ListCompaniesRequest\x1a$.karlo.auth.v1.ListCompaniesResponse\x12i\n" +
 	"\x12ListCompanyMembers\x12(.karlo.auth.v1.ListCompanyMembersRequest\x1a).karlo.auth.v1.ListCompanyMembersResponse\x12u\n" +
 	"\x16ResolveDeliveryTargets\x12,.karlo.auth.v1.ResolveDeliveryTargetsRequest\x1a-.karlo.auth.v1.ResolveDeliveryTargetsResponseB\xcd\x01\n" +
 	"\x11com.karlo.auth.v1B\tAuthProtoP\x01ZWgithub.com/karlo/authentication-service/internal/platform/genproto/karlo/auth/v1;authv1\xa2\x02\x03KAX\xaa\x02\rKarlo.Auth.V1\xca\x02\rKarlo\\Auth\\V1\xe2\x02\x19Karlo\\Auth\\V1\\GPBMetadata\xea\x02\x0fKarlo::Auth::V1b\x06proto3"
@@ -1542,7 +1726,7 @@ func file_karlo_auth_v1_auth_proto_rawDescGZIP() []byte {
 }
 
 var file_karlo_auth_v1_auth_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_karlo_auth_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
+var file_karlo_auth_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_karlo_auth_v1_auth_proto_goTypes = []any{
 	(TokenKind)(0),                         // 0: karlo.auth.v1.TokenKind
 	(*ProductAccess)(nil),                  // 1: karlo.auth.v1.ProductAccess
@@ -1560,56 +1744,63 @@ var file_karlo_auth_v1_auth_proto_goTypes = []any{
 	(*CheckPermissionResponse)(nil),        // 13: karlo.auth.v1.CheckPermissionResponse
 	(*GetCompanyRequest)(nil),              // 14: karlo.auth.v1.GetCompanyRequest
 	(*GetCompanyResponse)(nil),             // 15: karlo.auth.v1.GetCompanyResponse
-	(*ListCompanyMembersRequest)(nil),      // 16: karlo.auth.v1.ListCompanyMembersRequest
-	(*ListCompanyMembersResponse)(nil),     // 17: karlo.auth.v1.ListCompanyMembersResponse
-	(*ResolveDeliveryTargetsRequest)(nil),  // 18: karlo.auth.v1.ResolveDeliveryTargetsRequest
-	(*DeliveryTarget)(nil),                 // 19: karlo.auth.v1.DeliveryTarget
-	(*ResolveDeliveryTargetsResponse)(nil), // 20: karlo.auth.v1.ResolveDeliveryTargetsResponse
-	nil,                                    // 21: karlo.auth.v1.User.AccessEntry
-	nil,                                    // 22: karlo.auth.v1.User.PermissionEntry
-	nil,                                    // 23: karlo.auth.v1.PermissionModule.ActionsEntry
-	(*timestamppb.Timestamp)(nil),          // 24: google.protobuf.Timestamp
-	(*v1.Query)(nil),                       // 25: karlo.common.v1.Query
-	(*v1.PageInfo)(nil),                    // 26: karlo.common.v1.PageInfo
+	(*ListCompaniesRequest)(nil),           // 16: karlo.auth.v1.ListCompaniesRequest
+	(*ListCompaniesResponse)(nil),          // 17: karlo.auth.v1.ListCompaniesResponse
+	(*ListCompanyMembersRequest)(nil),      // 18: karlo.auth.v1.ListCompanyMembersRequest
+	(*ListCompanyMembersResponse)(nil),     // 19: karlo.auth.v1.ListCompanyMembersResponse
+	(*ResolveDeliveryTargetsRequest)(nil),  // 20: karlo.auth.v1.ResolveDeliveryTargetsRequest
+	(*DeliveryTarget)(nil),                 // 21: karlo.auth.v1.DeliveryTarget
+	(*ResolveDeliveryTargetsResponse)(nil), // 22: karlo.auth.v1.ResolveDeliveryTargetsResponse
+	nil,                                    // 23: karlo.auth.v1.User.AccessEntry
+	nil,                                    // 24: karlo.auth.v1.User.PermissionEntry
+	nil,                                    // 25: karlo.auth.v1.PermissionModule.ActionsEntry
+	(*timestamppb.Timestamp)(nil),          // 26: google.protobuf.Timestamp
+	(*v1.Query)(nil),                       // 27: karlo.common.v1.Query
+	(*v1.PageInfo)(nil),                    // 28: karlo.common.v1.PageInfo
 }
 var file_karlo_auth_v1_auth_proto_depIdxs = []int32{
-	21, // 0: karlo.auth.v1.User.access:type_name -> karlo.auth.v1.User.AccessEntry
-	22, // 1: karlo.auth.v1.User.permission:type_name -> karlo.auth.v1.User.PermissionEntry
-	24, // 2: karlo.auth.v1.User.created_at:type_name -> google.protobuf.Timestamp
-	24, // 3: karlo.auth.v1.User.updated_at:type_name -> google.protobuf.Timestamp
-	23, // 4: karlo.auth.v1.PermissionModule.actions:type_name -> karlo.auth.v1.PermissionModule.ActionsEntry
+	23, // 0: karlo.auth.v1.User.access:type_name -> karlo.auth.v1.User.AccessEntry
+	24, // 1: karlo.auth.v1.User.permission:type_name -> karlo.auth.v1.User.PermissionEntry
+	26, // 2: karlo.auth.v1.User.created_at:type_name -> google.protobuf.Timestamp
+	26, // 3: karlo.auth.v1.User.updated_at:type_name -> google.protobuf.Timestamp
+	25, // 4: karlo.auth.v1.PermissionModule.actions:type_name -> karlo.auth.v1.PermissionModule.ActionsEntry
 	5,  // 5: karlo.auth.v1.Company.settings:type_name -> karlo.auth.v1.CompanySettings
-	24, // 6: karlo.auth.v1.Company.created_at:type_name -> google.protobuf.Timestamp
-	2,  // 7: karlo.auth.v1.ValidateTokenResponse.user:type_name -> karlo.auth.v1.User
-	0,  // 8: karlo.auth.v1.ValidateTokenResponse.kind:type_name -> karlo.auth.v1.TokenKind
-	2,  // 9: karlo.auth.v1.GetUserResponse.user:type_name -> karlo.auth.v1.User
-	2,  // 10: karlo.auth.v1.GetUsersResponse.users:type_name -> karlo.auth.v1.User
-	4,  // 11: karlo.auth.v1.GetCompanyResponse.company:type_name -> karlo.auth.v1.Company
-	25, // 12: karlo.auth.v1.ListCompanyMembersRequest.query:type_name -> karlo.common.v1.Query
-	2,  // 13: karlo.auth.v1.ListCompanyMembersResponse.users:type_name -> karlo.auth.v1.User
-	26, // 14: karlo.auth.v1.ListCompanyMembersResponse.page_info:type_name -> karlo.common.v1.PageInfo
-	19, // 15: karlo.auth.v1.ResolveDeliveryTargetsResponse.targets:type_name -> karlo.auth.v1.DeliveryTarget
-	1,  // 16: karlo.auth.v1.User.AccessEntry.value:type_name -> karlo.auth.v1.ProductAccess
-	3,  // 17: karlo.auth.v1.User.PermissionEntry.value:type_name -> karlo.auth.v1.PermissionModule
-	6,  // 18: karlo.auth.v1.AuthService.ValidateToken:input_type -> karlo.auth.v1.ValidateTokenRequest
-	8,  // 19: karlo.auth.v1.AuthService.GetUser:input_type -> karlo.auth.v1.GetUserRequest
-	10, // 20: karlo.auth.v1.AuthService.GetUsers:input_type -> karlo.auth.v1.GetUsersRequest
-	12, // 21: karlo.auth.v1.AuthService.CheckPermission:input_type -> karlo.auth.v1.CheckPermissionRequest
-	14, // 22: karlo.auth.v1.AuthService.GetCompany:input_type -> karlo.auth.v1.GetCompanyRequest
-	16, // 23: karlo.auth.v1.AuthService.ListCompanyMembers:input_type -> karlo.auth.v1.ListCompanyMembersRequest
-	18, // 24: karlo.auth.v1.AuthService.ResolveDeliveryTargets:input_type -> karlo.auth.v1.ResolveDeliveryTargetsRequest
-	7,  // 25: karlo.auth.v1.AuthService.ValidateToken:output_type -> karlo.auth.v1.ValidateTokenResponse
-	9,  // 26: karlo.auth.v1.AuthService.GetUser:output_type -> karlo.auth.v1.GetUserResponse
-	11, // 27: karlo.auth.v1.AuthService.GetUsers:output_type -> karlo.auth.v1.GetUsersResponse
-	13, // 28: karlo.auth.v1.AuthService.CheckPermission:output_type -> karlo.auth.v1.CheckPermissionResponse
-	15, // 29: karlo.auth.v1.AuthService.GetCompany:output_type -> karlo.auth.v1.GetCompanyResponse
-	17, // 30: karlo.auth.v1.AuthService.ListCompanyMembers:output_type -> karlo.auth.v1.ListCompanyMembersResponse
-	20, // 31: karlo.auth.v1.AuthService.ResolveDeliveryTargets:output_type -> karlo.auth.v1.ResolveDeliveryTargetsResponse
-	25, // [25:32] is the sub-list for method output_type
-	18, // [18:25] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	26, // 6: karlo.auth.v1.Company.created_at:type_name -> google.protobuf.Timestamp
+	26, // 7: karlo.auth.v1.Company.updated_at:type_name -> google.protobuf.Timestamp
+	2,  // 8: karlo.auth.v1.ValidateTokenResponse.user:type_name -> karlo.auth.v1.User
+	0,  // 9: karlo.auth.v1.ValidateTokenResponse.kind:type_name -> karlo.auth.v1.TokenKind
+	2,  // 10: karlo.auth.v1.GetUserResponse.user:type_name -> karlo.auth.v1.User
+	2,  // 11: karlo.auth.v1.GetUsersResponse.users:type_name -> karlo.auth.v1.User
+	4,  // 12: karlo.auth.v1.GetCompanyResponse.company:type_name -> karlo.auth.v1.Company
+	26, // 13: karlo.auth.v1.ListCompaniesRequest.updated_since:type_name -> google.protobuf.Timestamp
+	4,  // 14: karlo.auth.v1.ListCompaniesResponse.companies:type_name -> karlo.auth.v1.Company
+	27, // 15: karlo.auth.v1.ListCompanyMembersRequest.query:type_name -> karlo.common.v1.Query
+	2,  // 16: karlo.auth.v1.ListCompanyMembersResponse.users:type_name -> karlo.auth.v1.User
+	28, // 17: karlo.auth.v1.ListCompanyMembersResponse.page_info:type_name -> karlo.common.v1.PageInfo
+	21, // 18: karlo.auth.v1.ResolveDeliveryTargetsResponse.targets:type_name -> karlo.auth.v1.DeliveryTarget
+	1,  // 19: karlo.auth.v1.User.AccessEntry.value:type_name -> karlo.auth.v1.ProductAccess
+	3,  // 20: karlo.auth.v1.User.PermissionEntry.value:type_name -> karlo.auth.v1.PermissionModule
+	6,  // 21: karlo.auth.v1.AuthService.ValidateToken:input_type -> karlo.auth.v1.ValidateTokenRequest
+	8,  // 22: karlo.auth.v1.AuthService.GetUser:input_type -> karlo.auth.v1.GetUserRequest
+	10, // 23: karlo.auth.v1.AuthService.GetUsers:input_type -> karlo.auth.v1.GetUsersRequest
+	12, // 24: karlo.auth.v1.AuthService.CheckPermission:input_type -> karlo.auth.v1.CheckPermissionRequest
+	14, // 25: karlo.auth.v1.AuthService.GetCompany:input_type -> karlo.auth.v1.GetCompanyRequest
+	16, // 26: karlo.auth.v1.AuthService.ListCompanies:input_type -> karlo.auth.v1.ListCompaniesRequest
+	18, // 27: karlo.auth.v1.AuthService.ListCompanyMembers:input_type -> karlo.auth.v1.ListCompanyMembersRequest
+	20, // 28: karlo.auth.v1.AuthService.ResolveDeliveryTargets:input_type -> karlo.auth.v1.ResolveDeliveryTargetsRequest
+	7,  // 29: karlo.auth.v1.AuthService.ValidateToken:output_type -> karlo.auth.v1.ValidateTokenResponse
+	9,  // 30: karlo.auth.v1.AuthService.GetUser:output_type -> karlo.auth.v1.GetUserResponse
+	11, // 31: karlo.auth.v1.AuthService.GetUsers:output_type -> karlo.auth.v1.GetUsersResponse
+	13, // 32: karlo.auth.v1.AuthService.CheckPermission:output_type -> karlo.auth.v1.CheckPermissionResponse
+	15, // 33: karlo.auth.v1.AuthService.GetCompany:output_type -> karlo.auth.v1.GetCompanyResponse
+	17, // 34: karlo.auth.v1.AuthService.ListCompanies:output_type -> karlo.auth.v1.ListCompaniesResponse
+	19, // 35: karlo.auth.v1.AuthService.ListCompanyMembers:output_type -> karlo.auth.v1.ListCompanyMembersResponse
+	22, // 36: karlo.auth.v1.AuthService.ResolveDeliveryTargets:output_type -> karlo.auth.v1.ResolveDeliveryTargetsResponse
+	29, // [29:37] is the sub-list for method output_type
+	21, // [21:29] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_karlo_auth_v1_auth_proto_init() }
@@ -1623,7 +1814,7 @@ func file_karlo_auth_v1_auth_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_karlo_auth_v1_auth_proto_rawDesc), len(file_karlo_auth_v1_auth_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   23,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

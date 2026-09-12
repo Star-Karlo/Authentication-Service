@@ -85,6 +85,29 @@ func (r *CompanyRepository) UpdateFields(ctx context.Context, id uuid.UUID, fiel
 	return nil
 }
 
+// ListForSync pages companies for a service keeping a projection of them.
+// onlyFMS narrows to companies FMS knows; updatedSince makes the refresh
+// incremental. Ordered by id so a page boundary is stable across calls.
+func (r *CompanyRepository) ListForSync(ctx context.Context, page, pageSize int, onlyFMS bool, updatedSince *time.Time) ([]models.Company, int64, error) {
+	q := r.db.WithContext(ctx).Model(&models.Company{})
+	if onlyFMS {
+		q = q.Where("fms_tenant_id IS NOT NULL")
+	}
+	if updatedSince != nil {
+		q = q.Where("updated_at >= ?", *updatedSince)
+	}
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("repository: count companies: %w", err)
+	}
+	var out []models.Company
+	err := q.Order("id").Offset(page * pageSize).Limit(pageSize).Find(&out).Error
+	if err != nil {
+		return nil, 0, fmt.Errorf("repository: list companies: %w", err)
+	}
+	return out, total, nil
+}
+
 func (r *CompanyRepository) List(ctx context.Context, p query.Params) ([]models.Company, int64, error) {
 	q := applyFilters(r.db.WithContext(ctx).Model(&models.Company{}), p)
 	if p.Search != "" {
