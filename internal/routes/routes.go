@@ -58,7 +58,7 @@ func Setup(d Deps) *gin.Engine {
 	router.Use(cors.New(cors.Config{
 		AllowOrigins:     d.Config.CORSAllowedOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "X-Request-Id"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "X-Request-Id", "X-Acting-For"},
 		ExposeHeaders:    []string{"X-Request-Id"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
