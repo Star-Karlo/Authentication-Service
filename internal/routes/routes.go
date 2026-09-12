@@ -156,6 +156,11 @@ func registerProtected(api *gin.RouterGroup, d Deps) {
 			authctx.RequireModule("collaboration.inviteMember"), d.Shippers.IssueClaimLink)
 	}
 
+	// A company's own profile — what its documents print. Editing it is an
+	// administrator's job, so it shares the member-management gate.
+	protected.GET("/companies/me", d.Companies.Me)
+	protected.PUT("/companies/me", authctx.RequireModule("collaboration.manageMember"), d.Companies.UpdateMe)
+
 	// Merging moves records between tenants, so it is platform staff only.
 	companies := protected.Group("/companies")
 	companies.Use(authctx.RequirePlatformStaff())
@@ -229,6 +234,7 @@ func registerAdmin(protected *gin.RouterGroup, d Deps) {
 	// /companies/:id/entitlements group below so "companies" alone resolves
 	// here rather than being read as a missing id.
 	admin.GET("/companies", d.Companies.List)
+	admin.PUT("/companies/:id", d.Companies.Update)
 
 	companies := admin.Group("/companies/:id/entitlements")
 	companies.GET("", d.Entitlement.List)

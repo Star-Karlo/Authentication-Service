@@ -165,13 +165,29 @@ type Company struct {
 	// company that never was an FMS tenant.
 	FMSTenantID *int64 `gorm:"column:fms_tenant_id" json:"fmsTenantId,omitempty"`
 
-	NPWP           *string `gorm:"column:npwp" json:"npwp,omitempty"`
-	Address        *string `json:"address,omitempty"`
+	// LegalName is what a document prints — "PT Karlo Logistik Indonesia" —
+	// where Name is what the console shows — "Karlo". Nil falls back to Name.
+	LegalName *string `gorm:"column:legal_name" json:"legalName,omitempty"`
+
+	NPWP    *string `gorm:"column:npwp" json:"npwp,omitempty"`
+	Address *string `json:"address,omitempty"`
+	// City and Province are names, as printed. CityID / ProvinceID are
+	// legacy identifiers from the monolith that nothing resolves.
+	City           *string `gorm:"column:city" json:"city,omitempty"`
+	Province       *string `gorm:"column:province" json:"province,omitempty"`
+	PostalCode     *string `gorm:"column:postal_code" json:"postalCode,omitempty"`
+	Country        string  `gorm:"column:country;not null;default:ID" json:"country"`
+	Phone          *string `gorm:"column:phone" json:"phone,omitempty"`
+	Email          *string `gorm:"column:email" json:"email,omitempty"`
+	Website        *string `gorm:"column:website" json:"website,omitempty"`
 	CityID         *string `gorm:"column:city_id" json:"cityId,omitempty"`
 	ProvinceID     *string `gorm:"column:province_id" json:"provinceId,omitempty"`
 	CompanyProfile *string `json:"companyProfile,omitempty"`
-	LogoURL        *string `gorm:"column:logo_url" json:"logoUrl,omitempty"`
-	BannerURL      *string `gorm:"column:banner_url" json:"bannerUrl,omitempty"`
+	// LogoKey is an object key in the uploads bucket; LogoURL is the legacy
+	// public URL. A signed URL is minted from the key on demand, never stored.
+	LogoKey   *string `gorm:"column:logo_key" json:"logoKey,omitempty"`
+	LogoURL   *string `gorm:"column:logo_url" json:"logoUrl,omitempty"`
+	BannerURL *string `gorm:"column:banner_url" json:"bannerUrl,omitempty"`
 
 	Settings        CompanySettings `gorm:"type:jsonb" json:"settings"`
 	BankAccount     JSONMap         `gorm:"type:jsonb" json:"bankAccount,omitempty"`

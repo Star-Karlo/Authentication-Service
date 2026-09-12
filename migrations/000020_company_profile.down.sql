@@ -1,0 +1,12 @@
+BEGIN;
+ALTER TABLE companies
+    DROP COLUMN IF EXISTS legal_name,
+    DROP COLUMN IF EXISTS phone,
+    DROP COLUMN IF EXISTS email,
+    DROP COLUMN IF EXISTS website,
+    DROP COLUMN IF EXISTS city,
+    DROP COLUMN IF EXISTS province,
+    DROP COLUMN IF EXISTS postal_code,
+    DROP COLUMN IF EXISTS country,
+    DROP COLUMN IF EXISTS logo_key;
+COMMIT;

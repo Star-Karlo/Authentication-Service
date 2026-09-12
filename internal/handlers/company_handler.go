@@ -1,10 +1,14 @@
 package handlers
 
 import (
+	"errors"
 	"math"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
+	"github.com/karlo/authentication-service/internal/platform/authctx"
 	"github.com/karlo/authentication-service/internal/platform/query"
 	"github.com/karlo/authentication-service/internal/platform/response"
 	"github.com/karlo/authentication-service/internal/repository"
@@ -80,4 +84,161 @@ func (h *CompanyHandler) List(c *gin.Context) {
 	response.Paginated(c, companies, &response.Meta{
 		Page: p.Page, Limit: p.PageSize, TotalRows: total, TotalPages: pages,
 	})
+}
+
+// profileRequest is the printable company profile. Every field is optional
+// and a field left out is left alone; an explicit "" clears it. Identity —
+// role, NPWP, NIB, suspension — is not here: those are platform decisions,
+// not something a company edits about itself.
+type profileRequest struct {
+	Name       *string `json:"name"`
+	LegalName  *string `json:"legalName"`
+	Address    *string `json:"address"`
+	City       *string `json:"city"`
+	Province   *string `json:"province"`
+	PostalCode *string `json:"postalCode"`
+	Country    *string `json:"country"`
+	Phone      *string `json:"phone"`
+	Email      *string `json:"email"`
+	Website    *string `json:"website"`
+	LogoKey    *string `json:"logoKey"`
+}
+
+func (r profileRequest) fields() (map[string]interface{}, error) {
+	out := map[string]interface{}{}
+	set := func(col string, v *string) {
+		if v != nil {
+			out[col] = nilIfBlank(strings.TrimSpace(*v))
+		}
+	}
+	if r.Name != nil && strings.TrimSpace(*r.Name) == "" {
+		return nil, errors.New("name cannot be empty")
+	}
+	set("name", r.Name)
+	set("legal_name", r.LegalName)
+	set("address", r.Address)
+	set("city", r.City)
+	set("province", r.Province)
+	set("postal_code", r.PostalCode)
+	set("phone", r.Phone)
+	set("email", r.Email)
+	set("website", r.Website)
+	set("logo_key", r.LogoKey)
+	if r.Country != nil {
+		cc := strings.ToUpper(strings.TrimSpace(*r.Country))
+		if len(cc) != 2 {
+			return nil, errors.New("country must be an ISO 3166-1 alpha-2 code")
+		}
+		out["country"] = cc
+	}
+	return out, nil
+}
+
+func nilIfBlank(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// Me returns the caller's own company (or the one staff are acting for).
+//
+// @Summary  My company
+// @Tags     Companies
+// @Security BearerAuth
+// @Success  200 {object} models.Company
+// @Router   /companies/me [get]
+func (h *CompanyHandler) Me(c *gin.Context) {
+	id, ok := ownCompany(c)
+	if !ok {
+		return
+	}
+	company, err := h.companies.FindByID(c.Request.Context(), id)
+	if err != nil {
+		response.NotFound(c, "Company not found")
+		return
+	}
+	response.OK(c, company)
+}
+
+// UpdateMe edits the caller's own company profile.
+//
+// @Summary  Update my company profile
+// @Tags     Companies
+// @Security BearerAuth
+// @Param    body body profileRequest true "Profile"
+// @Success  200 {object} models.Company
+// @Router   /companies/me [put]
+func (h *CompanyHandler) UpdateMe(c *gin.Context) {
+	id, ok := ownCompany(c)
+	if !ok {
+		return
+	}
+	h.updateProfile(c, id)
+}
+
+// Update edits any company's profile; platform staff only.
+//
+// @Summary  Update a company profile
+// @Tags     Companies
+// @Security BearerAuth
+// @Param    id   path string         true "Company ID"
+// @Param    body body profileRequest true "Profile"
+// @Success  200 {object} models.Company
+// @Router   /admin/companies/{id} [put]
+func (h *CompanyHandler) Update(c *gin.Context) {
+	id, ok := pathID(c)
+	if !ok {
+		return
+	}
+	h.updateProfile(c, id)
+}
+
+func (h *CompanyHandler) updateProfile(c *gin.Context, id uuid.UUID) {
+	var req profileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	fields, err := req.fields()
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if err := h.companies.UpdateFields(c.Request.Context(), id, fields); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			response.NotFound(c, "Company not found")
+			return
+		}
+		response.InternalError(c, "Could not update the company.")
+		return
+	}
+	company, err := h.companies.FindByID(c.Request.Context(), id)
+	if err != nil {
+		response.NotFound(c, "Company not found")
+		return
+	}
+	response.OK(c, company)
+}
+
+// ownCompany is the company a request is about: the caller's, or the one a
+// staff member is acting for.
+func ownCompany(c *gin.Context) (uuid.UUID, bool) {
+	principal, ok := authctx.Gin(c)
+	if !ok {
+		response.Unauthorized(c, "No token provided.")
+		return uuid.Nil, false
+	}
+	raw := principal.CompanyID
+	if principal.IsPlatformStaff {
+		if acting := strings.TrimSpace(c.GetHeader("X-Acting-For")); acting != "" {
+			raw = acting
+		}
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		response.Forbidden(c, "Only a company has a profile.")
+		return uuid.Nil, false
+	}
+	return id, true
 }
