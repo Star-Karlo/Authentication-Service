@@ -110,7 +110,22 @@ func (r *RoleRepository) Create(ctx context.Context, role *models.Role) error {
 	return nil
 }
 
-func (r *RoleRepository) Update(ctx context.Context, companyID, id uuid.UUID, fields map[string]interface{}) error {
+// ReplaceProductKeys is an Update option that swaps one product's keys in
+// the permissions array for the given set, leaving every other product's
+// keys where they are. The array surgery happens inside the UPDATE, so it
+// is atomic against a concurrent save from the other product.
+func ReplaceProductKeys(product string, keys []string) func(map[string]interface{}) {
+	return func(fields map[string]interface{}) {
+		fields["permissions"] = gorm.Expr(
+			"array_cat(ARRAY(SELECT p FROM unnest(permissions) AS p WHERE p NOT LIKE ?), ?::text[])",
+			product+":%", models.StringArray(keys))
+	}
+}
+
+func (r *RoleRepository) Update(ctx context.Context, companyID, id uuid.UUID, fields map[string]interface{}, opts ...func(map[string]interface{})) error {
+	for _, opt := range opts {
+		opt(fields)
+	}
 	res := r.db.WithContext(ctx).Model(&models.Role{}).
 		Where("id = ? AND company_id = ?", id, companyID).
 		Updates(fields)

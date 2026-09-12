@@ -55,6 +55,22 @@ func (r *CompanyRepository) Create(ctx context.Context, c *models.Company) error
 	return nil
 }
 
+// AllocateFMSTenantID gives a company its FMS-facing bigint if it has none.
+//
+// A no-op for a company that already has one — an imported tenant keeps the
+// id FMS knows it by — so it is safe to call on every FMS grant. The
+// allocation and the null check are one statement, so two concurrent grants
+// cannot hand the same company two ids.
+func (r *CompanyRepository) AllocateFMSTenantID(ctx context.Context, id uuid.UUID) error {
+	err := r.db.WithContext(ctx).Exec(
+		"UPDATE companies SET fms_tenant_id = nextval('companies_fms_tenant_id_seq') "+
+			"WHERE id = ? AND fms_tenant_id IS NULL", id).Error
+	if err != nil {
+		return fmt.Errorf("repository: allocate fms tenant id: %w", err)
+	}
+	return nil
+}
+
 func (r *CompanyRepository) UpdateFields(ctx context.Context, id uuid.UUID, fields map[string]interface{}) error {
 	if len(fields) == 0 {
 		return nil

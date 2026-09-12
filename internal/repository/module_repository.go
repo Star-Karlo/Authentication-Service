@@ -60,6 +60,25 @@ func (r *ModuleRepository) ActiveForCompany(ctx context.Context, companyID uuid.
 
 // ListForCompany returns the full entitlement rows, including disabled and
 // expired ones, for an administration screen.
+// ModeFor reports how a missing company_modules row reads for one product:
+// "grant" (opt-in, the default) or "revoke" (opt-out).
+func (r *ModuleRepository) ModeFor(ctx context.Context, companyID uuid.UUID, product authctx.Product) (string, error) {
+	var mode string
+	err := r.db.WithContext(ctx).
+		Table("company_product_settings").
+		Select("entitlement_mode").
+		Where("company_id = ? AND product = ?", companyID, string(product)).
+		Limit(1).
+		Scan(&mode).Error
+	if err != nil {
+		return "", fmt.Errorf("repository: load entitlement mode: %w", err)
+	}
+	if mode == "" {
+		mode = models.EntitlementGrant
+	}
+	return mode, nil
+}
+
 func (r *ModuleRepository) ListForCompany(ctx context.Context, companyID uuid.UUID) ([]models.CompanyModule, error) {
 	var out []models.CompanyModule
 	err := r.db.WithContext(ctx).

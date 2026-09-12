@@ -106,11 +106,22 @@ func (s *EntitlementService) Grant(ctx context.Context, actor authctx.Principal,
 		return nil, fmt.Errorf("%w: the grant would expire before it starts", ErrValidation)
 	}
 
-	if _, err := s.companies.FindByID(ctx, in.CompanyID); err != nil {
+	company, err := s.companies.FindByID(ctx, in.CompanyID)
+	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, fmt.Errorf("%w: no such company", repository.ErrNotFound)
 		}
 		return nil, err
+	}
+
+	// Selling FMS to a company FMS has never heard of: give it the bigint
+	// identity FMS scopes everything by, or the grant produces a customer
+	// whose fleet screens are empty with nothing saying why. Imported
+	// tenants already have one and keep it.
+	if product == authctx.ProductFMS && company.FMSTenantID == nil {
+		if err := s.companies.AllocateFMSTenantID(ctx, in.CompanyID); err != nil {
+			return nil, err
+		}
 	}
 
 	actorID, err := actorUUID(actor)
@@ -167,6 +178,37 @@ func (s *EntitlementService) Revoke(ctx context.Context, actor authctx.Principal
 // working, and an answer that omits the revoked rows cannot address it.
 func (s *EntitlementService) ListForCompany(ctx context.Context, companyID uuid.UUID) ([]models.CompanyModule, error) {
 	return s.modules.ListForCompany(ctx, companyID)
+}
+
+// Effective is what a company actually holds for one product, read the way
+// a token reads it: under revoke mode that is everything sellable less the
+// rows explicitly withdrawn, which ListForCompany — the physical rows —
+// cannot show. An administration screen that rendered rows would show a
+// revoke-mode company as holding nothing, for exactly the companies that
+// hold everything.
+func (s *EntitlementService) Effective(ctx context.Context, companyID uuid.UUID, product authctx.Product) (*EffectiveEntitlement, error) {
+	if !authctx.IsKnownProduct(product) {
+		return nil, fmt.Errorf("%w: %q is not a product", ErrValidation, product)
+	}
+	mode, err := s.modules.ModeFor(ctx, companyID, product)
+	if err != nil {
+		return nil, err
+	}
+	modules, err := s.modules.ActiveForCompany(ctx, companyID, product)
+	if err != nil {
+		return nil, err
+	}
+	if modules == nil {
+		modules = []string{}
+	}
+	return &EffectiveEntitlement{Product: string(product), Mode: mode, Modules: modules}, nil
+}
+
+// EffectiveEntitlement is one product's resolved holding for a company.
+type EffectiveEntitlement struct {
+	Product string   `json:"product"`
+	Mode    string   `json:"mode"`
+	Modules []string `json:"modules"`
 }
 
 // History returns who changed a company's entitlement and when.

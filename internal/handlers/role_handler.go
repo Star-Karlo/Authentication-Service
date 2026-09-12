@@ -56,8 +56,29 @@ type roleResponse struct {
 // @Security BearerAuth
 // @Success  200 {object} response.Envelope
 // @Router   /roles [get]
+// roleProduct is which product's keys a request is about.
+//
+// A role spans every product its company holds — one "Supervisor" row can
+// carry tms: and fms: keys — but an editor only ever knows one catalogue.
+// So each request names its product (default tms, which is what every
+// existing caller meant), vetting runs against that catalogue, and a write
+// touches only that product's keys. An FMS editor saving a role cannot
+// strip the TMS keys it never saw, and vice versa.
+func roleProduct(c *gin.Context) (authctx.Product, bool) {
+	product := authctx.Product(c.DefaultQuery("product", string(authctx.ProductTMS)))
+	if len(authctx.CatalogFor(product)) == 0 {
+		response.BadRequest(c, "Unknown product: "+string(product))
+		return "", false
+	}
+	return product, true
+}
+
 func (h *RoleHandler) List(c *gin.Context) {
 	principal, companyID, ok := roleCaller(c)
+	if !ok {
+		return
+	}
+	product, ok := roleProduct(c)
 	if !ok {
 		return
 	}
@@ -68,14 +89,35 @@ func (h *RoleHandler) List(c *gin.Context) {
 		return
 	}
 
+	// An editor asking about one product sees only that product's keys, so
+	// it can round-trip what it is shown without knowing the other
+	// catalogue exists. The stored row is untouched.
+	if c.Query("product") != "" {
+		for i := range roles {
+			roles[i].Permissions = keysOf(product, roles[i].Permissions)
+		}
+	}
+
 	response.OK(c, gin.H{
 		"roles": roles,
 		// The grantable set, from the token's own product access. An
 		// administrator cannot hand out what the company has not been sold, so
 		// offering it in the editor would be offering a checkbox that does
 		// nothing.
-		"assignable": principal.GrantablePermissions(authctx.ProductTMS),
+		"assignable": principal.GrantablePermissions(product),
 	})
+}
+
+// keysOf is the subset of a role's qualified keys belonging to one product.
+func keysOf(product authctx.Product, keys []string) models.StringArray {
+	prefix := string(product) + ":"
+	out := models.StringArray{}
+	for _, k := range keys {
+		if len(k) > len(prefix) && k[:len(prefix)] == prefix {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 type roleRequest struct {
@@ -102,13 +144,18 @@ func (h *RoleHandler) Create(c *gin.Context) {
 		return
 	}
 
+	product, ok := roleProduct(c)
+	if !ok {
+		return
+	}
+
 	var req roleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
 
-	permissions, err := h.vetted(principal, req)
+	permissions, err := h.vetted(principal, product, req)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
@@ -151,6 +198,11 @@ func (h *RoleHandler) Update(c *gin.Context) {
 		return
 	}
 
+	product, ok := roleProduct(c)
+	if !ok {
+		return
+	}
+
 	var req roleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, err.Error())
@@ -172,7 +224,7 @@ func (h *RoleHandler) Update(c *gin.Context) {
 		return
 	}
 
-	permissions, err := h.vetted(principal, req)
+	permissions, err := h.vetted(principal, product, req)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
@@ -181,11 +233,15 @@ func (h *RoleHandler) Update(c *gin.Context) {
 	fields := map[string]interface{}{
 		"name":        req.Name,
 		"description": req.Description,
-		"permissions": models.StringArray(permissions),
 		"grants_all":  req.GrantsAll,
 	}
 
-	if err := h.roles.Update(c.Request.Context(), companyID, id, fields); err != nil {
+	// Only this product's keys are replaced; the other product's survive
+	// untouched. Done in the UPDATE itself rather than read-merge-write here,
+	// so two administrators saving the same role from two products cannot
+	// overwrite each other's half.
+	if err := h.roles.Update(c.Request.Context(), companyID, id, fields,
+		repository.ReplaceProductKeys(string(product), permissions)); err != nil {
 		if errors.Is(err, repository.ErrConflict) {
 			response.Conflict(c, "A role with that name already exists.")
 			return
@@ -245,7 +301,7 @@ func (h *RoleHandler) Delete(c *gin.Context) {
 // Refused rather than filtered, deliberately. A key silently dropped produces a
 // role the administrator believes grants something it does not, and the gap
 // only shows when somebody cannot do their job.
-func (h *RoleHandler) vetted(principal authctx.Principal, req roleRequest) ([]string, error) {
+func (h *RoleHandler) vetted(principal authctx.Principal, product authctx.Product, req roleRequest) ([]string, error) {
 	if req.GrantsAll {
 		// An administrator role lists nothing: it is everything the company
 		// holds, now and after the next purchase.
@@ -253,8 +309,8 @@ func (h *RoleHandler) vetted(principal authctx.Principal, req roleRequest) ([]st
 	}
 
 	grantable := map[string]bool{}
-	for _, spec := range principal.GrantablePermissions(authctx.ProductTMS) {
-		grantable[qualify(authctx.ProductTMS, spec.Key)] = true
+	for _, spec := range principal.GrantablePermissions(product) {
+		grantable[qualify(product, spec.Key)] = true
 		grantable[spec.Key] = true
 	}
 
@@ -263,7 +319,7 @@ func (h *RoleHandler) vetted(principal authctx.Principal, req roleRequest) ([]st
 		if !grantable[key] {
 			return nil, errors.New("your company cannot grant " + key)
 		}
-		out = append(out, qualify(authctx.ProductTMS, stripProduct(key)))
+		out = append(out, qualify(product, stripProduct(key)))
 	}
 	return out, nil
 }

@@ -234,5 +234,6 @@ func registerAdmin(protected *gin.RouterGroup, d Deps) {
 	companies.GET("", d.Entitlement.List)
 	companies.PUT("", d.Entitlement.Grant)
 	companies.GET("/history", d.Entitlement.History)
+	companies.GET("/effective", d.Entitlement.Effective)
 	companies.DELETE("/:product/:module", d.Entitlement.Revoke)
 }

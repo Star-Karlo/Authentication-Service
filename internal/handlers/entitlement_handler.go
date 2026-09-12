@@ -67,6 +67,30 @@ func (h *EntitlementHandler) List(c *gin.Context) {
 }
 
 // grantRequest is the body of a grant.
+// Effective is the resolved holding for one product — what a token would
+// carry — rather than the physical rows.
+//
+// @Summary  Effective entitlement for a product
+// @Tags     Entitlement
+// @Security BearerAuth
+// @Param    id      path  string true  "Company ID"
+// @Param    product query string false "tms (default) or fms"
+// @Success  200 {object} services.EffectiveEntitlement
+// @Router   /admin/companies/{id}/entitlements/effective [get]
+func (h *EntitlementHandler) Effective(c *gin.Context) {
+	companyID, ok := pathID(c)
+	if !ok {
+		return
+	}
+	product := authctx.Product(c.DefaultQuery("product", string(authctx.ProductTMS)))
+	out, err := h.entitlements.Effective(c.Request.Context(), companyID, product)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.OK(c, out)
+}
+
 type grantRequest struct {
 	Product string `json:"product" binding:"required"`
 	Module  string `json:"module" binding:"required"`
