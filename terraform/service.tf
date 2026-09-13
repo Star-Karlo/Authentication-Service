@@ -112,6 +112,13 @@ resource "aws_ecs_service" "main" {
     container_port   = var.http_port
   }
 
+  # The same task also serves gRPC to the load balancer; see grpc_public.tf.
+  load_balancer {
+    target_group_arn = aws_lb_target_group.grpc.arn
+    container_name   = var.service_name
+    container_port   = var.grpc_port
+  }
+
   service_registries {
     registry_arn = aws_service_discovery_service.main.arn
   }
