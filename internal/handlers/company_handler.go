@@ -171,7 +171,7 @@ func nilIfBlank(s string) interface{} {
 // @Success  200 {object} models.Company
 // @Router   /companies/me [get]
 func (h *CompanyHandler) Me(c *gin.Context) {
-	id, ok := ownCompany(c)
+	id, ok := scopeCompany(c)
 	if !ok {
 		return
 	}
@@ -192,7 +192,7 @@ func (h *CompanyHandler) Me(c *gin.Context) {
 // @Success  200 {object} models.Company
 // @Router   /companies/me [put]
 func (h *CompanyHandler) UpdateMe(c *gin.Context) {
-	id, ok := ownCompany(c)
+	id, ok := scopeCompany(c)
 	if !ok {
 		return
 	}
@@ -243,9 +243,13 @@ func (h *CompanyHandler) updateProfile(c *gin.Context, id uuid.UUID) {
 	response.OK(c, company)
 }
 
-// ownCompany is the company a request is about: the caller's, or the one a
-// staff member is acting for.
-func ownCompany(c *gin.Context) (uuid.UUID, bool) {
+// scopeCompany is the company a request is about: the caller's own, or the
+// client a Karlo staff member is acting for (X-Acting-For, staff only).
+//
+// One helper because "which company" is the same question on roles,
+// members, shippers and the profile — and answering it differently in one
+// handler is how staff acting for a client end up editing Karlo's own row.
+func scopeCompany(c *gin.Context) (uuid.UUID, bool) {
 	principal, ok := authctx.Gin(c)
 	if !ok {
 		response.Unauthorized(c, "No token provided.")

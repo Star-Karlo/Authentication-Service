@@ -53,9 +53,8 @@ func (h *ShipperHandler) Create(c *gin.Context) {
 		response.Unauthorized(c, "No token provided.")
 		return
 	}
-	companyID, err := uuid.Parse(principal.CompanyID)
-	if err != nil {
-		response.Forbidden(c, "Only a company can record a shipper.")
+	companyID, ok := scopeCompany(c)
+	if !ok {
 		return
 	}
 	actorID, _ := uuid.Parse(principal.UserID)
@@ -101,14 +100,8 @@ func (h *ShipperHandler) Create(c *gin.Context) {
 // @Security BearerAuth
 // @Router   /shippers [get]
 func (h *ShipperHandler) List(c *gin.Context) {
-	principal, ok := authctx.Gin(c)
+	companyID, ok := scopeCompany(c)
 	if !ok {
-		response.Unauthorized(c, "No token provided.")
-		return
-	}
-	companyID, err := uuid.Parse(principal.CompanyID)
-	if err != nil {
-		response.Forbidden(c, "Only a company has shippers.")
 		return
 	}
 

@@ -54,20 +54,11 @@ func (h *UserHandler) List(c *gin.Context) {
 	// for a company means seeing what that company's administrator sees;
 	// a platform-wide list behind a client's name is how a member of the
 	// wrong company gets invited, edited or suspended.
-	switch {
-	case principal.IsPlatformStaff && strings.TrimSpace(c.GetHeader("X-Acting-For")) != "":
-		companyID, perr := uuid.Parse(strings.TrimSpace(c.GetHeader("X-Acting-For")))
-		if perr != nil {
-			response.BadRequest(c, "X-Acting-For is not a company id")
-			return
-		}
-		users, total, err = h.users.ListCompanyMembers(c.Request.Context(), companyID, nil, params)
-	case principal.IsPlatformStaff:
+	if principal.IsPlatformStaff && strings.TrimSpace(c.GetHeader("X-Acting-For")) == "" {
 		users, total, err = h.users.List(c.Request.Context(), params)
-	default:
-		companyID, perr := uuid.Parse(principal.CompanyID)
-		if perr != nil {
-			response.Forbidden(c, "Access Denied")
+	} else {
+		companyID, ok := scopeCompany(c)
+		if !ok {
 			return
 		}
 		users, total, err = h.users.ListCompanyMembers(c.Request.Context(), companyID, nil, params)

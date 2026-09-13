@@ -33,9 +33,9 @@ func roleCaller(c *gin.Context) (authctx.Principal, uuid.UUID, bool) {
 		response.Unauthorized(c, "No token provided.")
 		return principal, uuid.Nil, false
 	}
-	companyID, err := uuid.Parse(principal.CompanyID)
-	if err != nil {
-		response.Forbidden(c, "Only a company has roles.")
+	// Own company, or the client staff are acting for.
+	companyID, ok := scopeCompany(c)
+	if !ok {
 		return principal, uuid.Nil, false
 	}
 	return principal, companyID, true
