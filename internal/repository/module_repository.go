@@ -142,7 +142,30 @@ func (r *ModuleRepository) Revoke(ctx context.Context, companyID uuid.UUID, prod
 			return fmt.Errorf("repository: revoke module: %w", res.Error)
 		}
 		if res.RowsAffected == 0 {
-			return ErrNotFound
+			// No row. Under grant mode that means the company never held the
+			// module and there is nothing to withdraw. Under revoke mode the
+			// company holds everything by default, and withdrawing one means
+			// WRITING the row that says so — a disabled row is the whole
+			// mechanism, not an edge case of it.
+			var mode string
+			if err := tx.Table("company_product_settings").
+				Select("entitlement_mode").
+				Where("company_id = ? AND product = ?", companyID, product).
+				Limit(1).Scan(&mode).Error; err != nil {
+				return fmt.Errorf("repository: load entitlement mode: %w", err)
+			}
+			if mode != models.EntitlementRevoke {
+				return ErrNotFound
+			}
+			if err := tx.Create(&models.CompanyModule{
+				CompanyID:       companyID,
+				Product:         product,
+				Module:          module,
+				Enabled:         false,
+				GrantedByUserID: actorID,
+			}).Error; err != nil {
+				return fmt.Errorf("repository: withdraw module: %w", err)
+			}
 		}
 
 		return tx.Create(&models.CompanyModuleEvent{
