@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -36,15 +37,28 @@ func (r *AccessRepository) WithTx(tx *gorm.DB) *AccessRepository {
 // "this person only uses FMS" is expressed.
 func (r *AccessRepository) BuildAccess(ctx context.Context, userID uuid.UUID, companyID *uuid.UUID) (map[authctx.Product]authctx.ProductAccess, error) {
 	// The role first: it carries the job, and may carry everything.
-	var role accessRole
+	var role struct {
+		accessRole
+		IsPlatformStaff bool
+	}
 	err := r.db.WithContext(ctx).
 		Table("users u").
-		Select("r.name, r.grants_all, r.permissions").
+		Select("r.name, r.grants_all, r.permissions, u.is_platform_staff").
 		Joins("JOIN roles r ON r.id = u.role_id").
 		Where("u.id = ?", userID).
 		Scan(&role).Error
 	if err != nil {
 		return nil, fmt.Errorf("repository: load role: %w", err)
+	}
+
+	// Karlo staff administer every product across every tenant. Their
+	// access is not the intersection of a role and a company's purchases:
+	// whichever company row they happen to be attached to — Karlo's own,
+	// which buys nothing — must not decide which consoles they can open.
+	// The permission check already bypasses for staff; this makes the
+	// access map say the same thing, so a client rendering from it agrees.
+	if role.IsPlatformStaff {
+		return staffAccess(role.Name), nil
 	}
 
 	// Then the per-person extras, which only ever ADD.
@@ -58,7 +72,7 @@ func (r *AccessRepository) BuildAccess(ctx context.Context, userID uuid.UUID, co
 		return nil, fmt.Errorf("repository: load extra access: %w", err)
 	}
 
-	return r.assemble(ctx, role, extras, companyID)
+	return r.assemble(ctx, role.accessRole, extras, companyID)
 }
 
 // BuildAccessForRole is BuildAccess for a machine credential: an API key
@@ -76,6 +90,30 @@ func (r *AccessRepository) BuildAccessForRole(ctx context.Context, roleID uuid.U
 		return nil, fmt.Errorf("repository: load role: %w", err)
 	}
 	return r.assemble(ctx, role, nil, companyID)
+}
+
+// staffAccess is every product, unrestricted, with every sellable feature.
+func staffAccess(roleName string) map[authctx.Product]authctx.ProductAccess {
+	if roleName == "" {
+		roleName = "Platform Staff"
+	}
+	out := map[authctx.Product]authctx.ProductAccess{}
+	for _, product := range []authctx.Product{authctx.ProductTMS, authctx.ProductFMS} {
+		features := []string{}
+		for _, f := range authctx.SellableFeatures(product) {
+			if !f.Roadmap {
+				features = append(features, f.Name)
+			}
+		}
+		sort.Strings(features)
+		out[product] = authctx.ProductAccess{
+			Role:        roleName,
+			GrantsAll:   true,
+			Permissions: []string{},
+			Features:    features,
+		}
+	}
+	return out
 }
 
 type accessRole struct {
