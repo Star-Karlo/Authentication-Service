@@ -2,8 +2,12 @@ package authctx
 
 import (
 	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -145,6 +149,33 @@ func (s *Signer) Sign(p Principal, registered jwt.RegisteredClaims) (string, err
 // verify its own tokens without loading the key twice.
 func (s *Signer) Public() *Verifier {
 	return &Verifier{pub: &s.priv.PublicKey}
+}
+
+// JWKS is the verification key as a JSON Web Key Set, for consumers that
+// would rather fetch the key than be handed a file: a rotation then needs
+// no coordinated redeploy of every service that checks our tokens.
+func (s *Signer) JWKS() map[string]interface{} {
+	pub := &s.priv.PublicKey
+	key := map[string]interface{}{
+		"kty": "RSA",
+		"use": "sig",
+		"alg": "RS256",
+		"n":   base64.RawURLEncoding.EncodeToString(pub.N.Bytes()),
+		"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes()),
+	}
+	if s.kid != "" {
+		key["kid"] = s.kid
+	}
+	return map[string]interface{}{"keys": []interface{}{key}}
+}
+
+// PublicPEM is the verification key as PEM, the form NewVerifier reads.
+func (s *Signer) PublicPEM() string {
+	der, err := x509.MarshalPKIXPublicKey(&s.priv.PublicKey)
+	if err != nil {
+		return ""
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))
 }
 
 // readKeyFile loads a PEM key from disk.

@@ -191,6 +191,7 @@ func run() error {
 	router := routes.Setup(routes.Deps{
 		Config:   cfg,
 		Verifier: signer.Public(),
+		Signer:   signer,
 		// This service validates tokens itself, so it is its own remote
 		// validator: API keys and single-device sessions resolve in-process.
 		Remote:      localValidator{auth: authService},

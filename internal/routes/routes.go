@@ -27,6 +27,7 @@ import (
 type Deps struct {
 	Config   *config.Config
 	Verifier *authctx.Verifier
+	Signer   *authctx.Signer
 	Remote   authctx.RemoteValidator
 
 	// Revocations lets a locally-verified token be refused before it expires.
@@ -63,6 +64,20 @@ func Setup(d Deps) *gin.Engine {
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
+
+	// The verification key, public by nature. JWKS for libraries that speak
+	// it, PEM for authctx.NewVerifier. Unauthenticated: the key verifies, it
+	// does not sign, and hiding it only makes rotation a coordinated redeploy.
+	if d.Signer != nil {
+		router.GET("/.well-known/jwks.json", func(c *gin.Context) {
+			c.Header("Cache-Control", "public, max-age=300")
+			c.JSON(http.StatusOK, d.Signer.JWKS())
+		})
+		router.GET("/.well-known/public-key.pem", func(c *gin.Context) {
+			c.Header("Cache-Control", "public, max-age=300")
+			c.Data(http.StatusOK, "application/x-pem-file", []byte(d.Signer.PublicPEM()))
+		})
+	}
 
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "authentication"})
