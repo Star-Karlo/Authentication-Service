@@ -4,6 +4,7 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -234,10 +235,17 @@ func (h *AuthHandler) RegisterMember(c *gin.Context) {
 		}
 		input.RoleID = &roleID
 	}
-	if principal.CompanyID != "" {
-		companyID, perr := uuid.Parse(principal.CompanyID)
+	// The member joins the caller's company — or, for Karlo staff acting
+	// for a client, that client. Without the second case a staff member
+	// "adding a user to MAST" would quietly add them to Karlo's own row.
+	target := principal.CompanyID
+	if acting := strings.TrimSpace(c.GetHeader("X-Acting-For")); acting != "" && principal.IsPlatformStaff {
+		target = acting
+	}
+	if target != "" {
+		companyID, perr := uuid.Parse(target)
 		if perr != nil {
-			response.BadRequest(c, "Invalid company on principal")
+			response.BadRequest(c, "Invalid company")
 			return
 		}
 		input.CompanyID = &companyID

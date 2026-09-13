@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -48,9 +49,22 @@ func (h *UserHandler) List(c *gin.Context) {
 		err   error
 	)
 
-	if principal.HasRole("superadmin", "admin") {
+	// Karlo staff see everyone — unless they are acting for a client, in
+	// which case they see that client's people and nobody else's. Acting
+	// for a company means seeing what that company's administrator sees;
+	// a platform-wide list behind a client's name is how a member of the
+	// wrong company gets invited, edited or suspended.
+	switch {
+	case principal.IsPlatformStaff && strings.TrimSpace(c.GetHeader("X-Acting-For")) != "":
+		companyID, perr := uuid.Parse(strings.TrimSpace(c.GetHeader("X-Acting-For")))
+		if perr != nil {
+			response.BadRequest(c, "X-Acting-For is not a company id")
+			return
+		}
+		users, total, err = h.users.ListCompanyMembers(c.Request.Context(), companyID, nil, params)
+	case principal.IsPlatformStaff:
 		users, total, err = h.users.List(c.Request.Context(), params)
-	} else {
+	default:
 		companyID, perr := uuid.Parse(principal.CompanyID)
 		if perr != nil {
 			response.Forbidden(c, "Access Denied")
