@@ -37,8 +37,13 @@ func (r *AccessRepository) WithTx(tx *gorm.DB) *AccessRepository {
 // "this person only uses FMS" is expressed.
 func (r *AccessRepository) BuildAccess(ctx context.Context, userID uuid.UUID, companyID *uuid.UUID) (map[authctx.Product]authctx.ProductAccess, error) {
 	// The role first: it carries the job, and may carry everything.
+	// Flat, not an embedded accessRole: GORM's Scan into a plain struct does
+	// not descend into anonymous fields, and an embedded version silently
+	// came back empty — every non-staff token then carried no role at all.
 	var role struct {
-		accessRole
+		Name            string
+		GrantsAll       bool
+		Permissions     pq.StringArray `gorm:"type:text[]"`
 		IsPlatformStaff bool
 	}
 	err := r.db.WithContext(ctx).
@@ -72,7 +77,7 @@ func (r *AccessRepository) BuildAccess(ctx context.Context, userID uuid.UUID, co
 		return nil, fmt.Errorf("repository: load extra access: %w", err)
 	}
 
-	return r.assemble(ctx, role.accessRole, extras, companyID)
+	return r.assemble(ctx, accessRole{Name: role.Name, GrantsAll: role.GrantsAll, Permissions: role.Permissions}, extras, companyID)
 }
 
 // BuildAccessForRole is BuildAccess for a machine credential: an API key
