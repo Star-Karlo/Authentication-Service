@@ -202,7 +202,7 @@ func run() error {
 		User:        handlers.NewUserHandler(userService),
 		// The Karlo staff surface for deciding what a company has bought.
 		Entitlement: handlers.NewEntitlementHandler(entitlementService),
-		Companies:   handlers.NewCompanyHandler(companyRepo),
+		Companies:   handlers.NewCompanyHandler(companyRepo, moduleRepo),
 		Roles:       handlers.NewRoleHandler(roleRepo),
 	})
 

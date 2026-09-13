@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/karlo/authentication-service/internal/models"
 	"github.com/karlo/authentication-service/internal/platform/authctx"
 	"github.com/karlo/authentication-service/internal/platform/query"
 	"github.com/karlo/authentication-service/internal/platform/response"
@@ -21,10 +22,19 @@ import (
 // across tenants is what the staff flag means.
 type CompanyHandler struct {
 	companies *repository.CompanyRepository
+	modules   *repository.ModuleRepository
 }
 
-func NewCompanyHandler(companies *repository.CompanyRepository) *CompanyHandler {
-	return &CompanyHandler{companies: companies}
+func NewCompanyHandler(companies *repository.CompanyRepository, modules *repository.ModuleRepository) *CompanyHandler {
+	return &CompanyHandler{companies: companies, modules: modules}
+}
+
+// companyRow is a company as the directory lists it: the record plus which
+// products it actually holds, so a screen can say "FMS only" without a
+// second request per row.
+type companyRow struct {
+	models.Company
+	Products []string `json:"products"`
 }
 
 // companyFields is the allowlist for filtering and sorting the directory.
@@ -77,11 +87,23 @@ func (h *CompanyHandler) List(c *gin.Context) {
 		return
 	}
 
+	rows := make([]companyRow, 0, len(companies))
+	for i := range companies {
+		row := companyRow{Company: companies[i], Products: []string{}}
+		for _, product := range []authctx.Product{authctx.ProductTMS, authctx.ProductFMS} {
+			held, err := h.modules.ActiveForCompany(c.Request.Context(), companies[i].ID, product)
+			if err == nil && len(held) > 0 {
+				row.Products = append(row.Products, string(product))
+			}
+		}
+		rows = append(rows, row)
+	}
+
 	pages := 0
 	if p.PageSize > 0 {
 		pages = int(math.Ceil(float64(total) / float64(p.PageSize)))
 	}
-	response.Paginated(c, companies, &response.Meta{
+	response.Paginated(c, rows, &response.Meta{
 		Page: p.Page, Limit: p.PageSize, TotalRows: total, TotalPages: pages,
 	})
 }
