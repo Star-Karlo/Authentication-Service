@@ -81,7 +81,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// it. The credentials were right, so this is not an authentication failure
 	// and the session stands — it is a clearer message in place of a silent
 	// wall of empty screens.
-	principal := principalOf(c, result)
+	principal := principalOf(result)
 	if req.Product != "" {
 		product := authctx.Product(req.Product)
 		if !authctx.IsKnownProduct(product) {
@@ -110,7 +110,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 // principalOf rebuilds the principal for a freshly minted token, so the login
 // response can carry the same access detail /auth/me does without the client
 // making a second call.
-func principalOf(c *gin.Context, result *services.LoginResult) authctx.Principal {
+func principalOf(result *services.LoginResult) authctx.Principal {
 	if result == nil || result.User == nil {
 		return authctx.Principal{}
 	}

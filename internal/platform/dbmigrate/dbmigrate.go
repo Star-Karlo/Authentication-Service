@@ -12,6 +12,7 @@
 package dbmigrate
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -36,7 +37,7 @@ func Run(dsn, dbName, dir string) error {
 	if err != nil {
 		return fmt.Errorf("migrate: open: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	driver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
@@ -73,10 +74,10 @@ func ensureDatabase(dsn, dbName string) error {
 	if err != nil {
 		return fmt.Errorf("migrate: open maintenance db: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	var exists bool
-	if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)`, dbName).Scan(&exists); err != nil {
+	if err := db.QueryRowContext(context.Background(), `SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)`, dbName).Scan(&exists); err != nil {
 		return fmt.Errorf("migrate: checking for %s: %w", dbName, err)
 	}
 	if exists {
@@ -84,7 +85,7 @@ func ensureDatabase(dsn, dbName string) error {
 	}
 	// The name comes from configuration, never a request, but it is quoted
 	// regardless: an identifier is not a parameter and cannot be bound.
-	if _, err := db.Exec(`CREATE DATABASE "` + strings.ReplaceAll(dbName, `"`, `""`) + `"`); err != nil {
+	if _, err := db.ExecContext(context.Background(), `CREATE DATABASE "`+strings.ReplaceAll(dbName, `"`, `""`)+`"`); err != nil {
 		return fmt.Errorf("migrate: creating %s: %w", dbName, err)
 	}
 	slog.Info("created database", "name", dbName)

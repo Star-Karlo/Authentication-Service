@@ -3,14 +3,15 @@ package repository
 import (
 	"context"
 	"fmt"
-	"github.com/karlo/authentication-service/internal/platform/revocation"
 	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
+
 	"github.com/karlo/authentication-service/internal/models"
 	"github.com/karlo/authentication-service/internal/platform/query"
-	"gorm.io/gorm"
+	"github.com/karlo/authentication-service/internal/platform/revocation"
 )
 
 // ---------------------------------------------------------------------------

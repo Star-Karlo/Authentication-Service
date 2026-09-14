@@ -19,7 +19,6 @@
 package revocation
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -252,9 +251,3 @@ func (NoopChecker) Revoked(string, string, string, time.Time) bool { return fals
 
 var _ Checker = (*List)(nil)
 var _ Checker = NoopChecker{}
-
-// ContextKey is unused but kept so callers cannot accidentally collide with a
-// string key in the request context.
-type contextKey struct{}
-
-var _ = context.Background

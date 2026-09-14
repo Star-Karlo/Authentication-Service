@@ -72,10 +72,7 @@ func main() {
 	}
 	fmt.Printf("read %d rows from %s\n\n", len(rows), *file)
 
-	plan, err := build(rows)
-	if err != nil {
-		fail("building the plan: %v", err)
-	}
+	plan := build(rows)
 	plan.report()
 
 	if !*confirm {

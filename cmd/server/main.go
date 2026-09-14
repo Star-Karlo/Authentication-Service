@@ -7,8 +7,6 @@ package main
 import (
 	"context"
 	"errors"
-	"github.com/karlo/authentication-service/internal/platform/bootstrap"
-	"github.com/karlo/authentication-service/internal/platform/dbmigrate"
 	"log/slog"
 	"net/http"
 	"os"
@@ -16,6 +14,9 @@ import (
 	"slices"
 	"syscall"
 	"time"
+
+	"github.com/karlo/authentication-service/internal/platform/bootstrap"
+	"github.com/karlo/authentication-service/internal/platform/dbmigrate"
 
 	"github.com/karlo/authentication-service/internal/config"
 	"github.com/karlo/authentication-service/internal/grpcserver"

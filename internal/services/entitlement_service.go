@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/karlo/authentication-service/internal/platform/revocation"
 	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/karlo/authentication-service/internal/models"
 	"github.com/karlo/authentication-service/internal/platform/authctx"
+	"github.com/karlo/authentication-service/internal/platform/revocation"
 	"github.com/karlo/authentication-service/internal/repository"
 )
 

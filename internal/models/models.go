@@ -11,10 +11,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/karlo/authentication-service/internal/platform/abbrev"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/karlo/authentication-service/internal/platform/abbrev"
 	"gorm.io/gorm"
 )
 

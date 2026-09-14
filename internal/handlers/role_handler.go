@@ -41,14 +41,6 @@ func roleCaller(c *gin.Context) (authctx.Principal, uuid.UUID, bool) {
 	return principal, companyID, true
 }
 
-type roleResponse struct {
-	models.Role
-	// Assignable is what this company may actually grant: the catalogue,
-	// narrowed to the features it holds. Returned with the roles so an editor
-	// does not have to ask twice and cannot offer a key that would be refused.
-	Assignable []authctx.PermissionSpec `json:"assignable,omitempty"`
-}
-
 // List returns the company's roles and what it may grant.
 //
 // @Summary  List roles

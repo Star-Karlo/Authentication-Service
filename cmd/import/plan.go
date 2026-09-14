@@ -83,7 +83,7 @@ type accessRow struct {
 	Permissions []string
 }
 
-func build(rows []row) (*plan, error) {
+func build(rows []row) *plan {
 	p := &plan{warnings: map[string]int{}}
 
 	// Pass 1: who is a company.
@@ -219,7 +219,7 @@ func build(rows []row) (*plan, error) {
 		})
 	}
 
-	return p, nil
+	return p
 }
 
 // resolveDuplicates decides which account keeps a shared identifier.
