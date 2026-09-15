@@ -129,3 +129,43 @@ resource "aws_scheduler_schedule" "archive" {
 }
 
 data "aws_caller_identity" "current" {}
+
+# --- Did last night's run happen? -------------------------------------------
+#
+# A scheduled task that fails to launch, or launches and dies, leaves nothing
+# but a missing log line. The archiver ends every successful run with
+# "archive run finished"; this counts those and alarms when two days pass
+# without one. A run that fails partway logs errors and exits non-zero
+# without that line, so it counts as missing too.
+resource "aws_cloudwatch_log_metric_filter" "archive_finished" {
+  count = var.archive_enabled ? 1 : 0
+
+  name           = "${local.name}-archive-finished"
+  log_group_name = aws_cloudwatch_log_group.service.name
+  pattern        = "\"archive run finished\""
+
+  metric_transformation {
+    name      = "ArchiveRunsFinished"
+    namespace = "Karlo/${local.name}"
+    value     = "1"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "archive_missed" {
+  count = var.archive_enabled ? 1 : 0
+
+  alarm_name          = "${local.name}-archive-missed"
+  alarm_description   = "No completed cold-storage run in the last two days"
+  namespace           = "Karlo/${local.name}"
+  metric_name         = "ArchiveRunsFinished"
+  statistic           = "Sum"
+  period              = 86400
+  evaluation_periods  = 2
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+  # No data means no run, which is exactly the condition to report.
+  treat_missing_data = "breaching"
+
+  alarm_actions = local.alarm_actions
+  ok_actions    = local.alarm_actions
+}
