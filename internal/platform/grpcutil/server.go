@@ -11,12 +11,14 @@ import (
 	"time"
 
 	"github.com/karlo/authentication-service/internal/platform/authctx"
+	"github.com/karlo/authentication-service/internal/platform/logger"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 )
@@ -49,6 +51,7 @@ func NewServer(cfg ServerConfig) *Server {
 	srv := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
 			RecoveryInterceptor(),
+			RequestIDServerInterceptor(),
 			LoggingInterceptor(),
 			authctx.UnaryServerInterceptor(cfg.Verifier, cfg.AcceptedServiceTokens),
 		),
@@ -125,6 +128,31 @@ func RecoveryInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
+// RequestIDServerInterceptor lifts the caller's request id out of the
+// metadata into the context, so every log line this call produces carries
+// the id the HTTP edge minted. A call with none gets none: an id invented
+// here would correlate with nothing.
+func RequestIDServerInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		if md, ok := metadata.FromIncomingContext(ctx); ok {
+			if ids := md.Get(logger.MetadataKey); len(ids) > 0 && ids[0] != "" {
+				ctx = logger.WithRequestID(ctx, ids[0])
+			}
+		}
+		return handler(ctx, req)
+	}
+}
+
+// RequestIDClientInterceptor forwards the context's request id as metadata.
+func RequestIDClientInterceptor() grpc.UnaryClientInterceptor {
+	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		if id := logger.RequestID(ctx); id != "" {
+			ctx = metadata.AppendToOutgoingContext(ctx, logger.MetadataKey, id)
+		}
+		return invoker(ctx, method, req, reply, cc, opts...)
+	}
+}
+
 // LoggingInterceptor emits one structured line per call.
 func LoggingInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
@@ -136,9 +164,9 @@ func LoggingInterceptor() grpc.UnaryServerInterceptor {
 			"code", status.Code(err).String(),
 		}
 		if err != nil {
-			slog.Error("grpc call failed", append(attrs, "error", err.Error())...)
+			slog.ErrorContext(ctx, "grpc call failed", append(attrs, "error", err.Error())...)
 		} else {
-			slog.Debug("grpc call", attrs...)
+			slog.DebugContext(ctx, "grpc call", attrs...)
 		}
 		return resp, err
 	}
@@ -163,6 +191,7 @@ func Dial(cfg DialConfig) (*grpc.ClientConn, error) {
 	conn, err := grpc.NewClient(cfg.Target,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithChainUnaryInterceptor(
+			RequestIDClientInterceptor(),
 			authctx.UnaryClientInterceptor(cfg.Service, cfg.ServiceToken),
 		),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{

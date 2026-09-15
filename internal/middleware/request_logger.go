@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/karlo/authentication-service/internal/platform/authctx"
+	"github.com/karlo/authentication-service/internal/platform/logger"
 )
 
 // RequestIDHeader is the correlation header. If the caller supplies one it is
@@ -44,6 +45,9 @@ func RequestLogger() gin.HandlerFunc {
 		}
 		c.Set("requestID", requestID)
 		c.Header(RequestIDHeader, requestID)
+		// Into the context: every slog.*Context line in this request and
+		// every gRPC call it makes carries the same id. See logger.RequestID.
+		c.Request = c.Request.WithContext(logger.WithRequestID(c.Request.Context(), requestID))
 
 		// Make the end user's token available to outbound gRPC calls made while
 		// serving this request, so downstream services see the same principal.

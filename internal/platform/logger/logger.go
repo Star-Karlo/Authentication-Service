@@ -82,7 +82,7 @@ func Init(cfg Config) {
 		handler = &fanoutHandler{handlers: handlers}
 	}
 
-	slog.SetDefault(slog.New(handler.WithAttrs(attrs)))
+	slog.SetDefault(slog.New(&requestIDHandler{next: handler.WithAttrs(attrs)}))
 }
 
 // InitFromEnv configures logging from the environment, which is how every
