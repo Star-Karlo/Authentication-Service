@@ -1,0 +1,18 @@
+# Weekly dependency PRs, grouped so one PR per ecosystem lands on Monday
+# rather than a dozen. CI runs on each (build, tests, lint, govulncheck), so
+# a bump that breaks something shows red before anyone merges it.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      go-deps:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
