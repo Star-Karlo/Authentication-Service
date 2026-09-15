@@ -101,6 +101,12 @@ func run() error {
 		return err
 	}
 
+	// `server archive [--dry-run]`: cold storage for the audit log and dead
+	// sessions, run nightly as a one-off task. See internal/archive.
+	if slices.Contains(os.Args[1:], "archive") {
+		return runArchive(cfg, db, slices.Contains(os.Args[1:], "--dry-run"))
+	}
+
 	// Optional. Without REDIS_ADDR this is a no-op and the login rate limiter
 	// falls back to counting audit rows.
 	cacheClient := cache.FromEnv("authentication")

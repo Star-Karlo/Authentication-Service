@@ -20,6 +20,17 @@ type Config struct {
 	Environment string
 	LogLevel    string
 
+	// Cold storage (see internal/archive): audit rows older than
+	// ArchiveAuditRetain move to S3 as Parquet; sessions dead for longer
+	// than ArchiveSessionRetain are deleted. Needs ArchiveBucket.
+	ArchiveBucket        string
+	ArchiveRegion        string
+	ArchivePrefix        string
+	ArchiveAuditRetain   time.Duration
+	ArchiveSessionRetain time.Duration
+	ArchiveBatch         int
+	ArchiveKeepAuditRows bool
+
 	HTTPPort string
 	GRPCPort string
 
@@ -119,6 +130,14 @@ func Load() (*Config, error) {
 
 		LoginRateLimit:  intOr("LOGIN_RATE_LIMIT", 5),
 		LoginRateWindow: durationOr("LOGIN_RATE_WINDOW", 15*time.Minute),
+
+		ArchiveBucket:        envOr("ARCHIVE_BUCKET", ""),
+		ArchiveRegion:        envOr("ARCHIVE_REGION", envOr("AWS_REGION", "ap-southeast-3")),
+		ArchivePrefix:        envOr("ARCHIVE_PREFIX", "archive/auth"),
+		ArchiveAuditRetain:   durationOr("ARCHIVE_RETAIN_AUDIT", 30*24*time.Hour),
+		ArchiveSessionRetain: durationOr("ARCHIVE_RETAIN_SESSIONS", 30*24*time.Hour),
+		ArchiveBatch:         intOr("ARCHIVE_BATCH", 100000),
+		ArchiveKeepAuditRows: os.Getenv("ARCHIVE_KEEP_AUDIT_ROWS") == "true",
 	}
 
 	var missing []string

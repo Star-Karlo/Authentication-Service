@@ -34,6 +34,10 @@ extra_environment = [
   { name = "BCRYPT_COST", value = "12" },
   { name = "LOGIN_RATE_LIMIT", value = "5" },
   { name = "LOGIN_RATE_WINDOW", value = "15m" },
+  # Cold storage (Go durations; 720h = 30 days). Audit rows older than this
+  # move to S3 as Parquet and are deleted here; sessions dead this long go.
+  { name = "ARCHIVE_RETAIN_AUDIT", value = "720h" },
+  { name = "ARCHIVE_RETAIN_SESSIONS", value = "720h" },
 ]
 
 # This service is the only holder of the JWT private key. No other service is

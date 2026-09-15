@@ -53,6 +53,12 @@ resource "aws_ecs_task_definition" "main" {
           { name = "REDIS_TLS", value = tostring(try(local.platform.redis_tls, false)) },
 
           { name = "FLUENTD_HOST", value = var.fluentd_host },
+
+          # Cold storage target; see archive.tf. The prefix keeps this
+          # service's files apart from the business service's in one bucket.
+          { name = "ARCHIVE_BUCKET", value = local.platform.uploads_bucket },
+          { name = "ARCHIVE_REGION", value = var.region },
+          { name = "ARCHIVE_PREFIX", value = "archive/auth" },
           { name = "CORS_ALLOWED_ORIGINS", value = join(",", var.cors_allowed_origins) },
 
           # Gin trusts X-Forwarded-For from any address unless told which
