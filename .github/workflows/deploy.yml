@@ -52,7 +52,7 @@ jobs:
     steps:
       # On a workflow_run the checkout must name the commit CI tested; the
       # default would be whatever main points at by the time this starts.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
