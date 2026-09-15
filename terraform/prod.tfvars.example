@@ -17,6 +17,9 @@ environment = "prod"
 # false is the safe default. Set true deliberately, knowing the trade.
 cors_allowed_origins = ["https://tms.karlo.id", "https://fms.karlo.id"]
 fluentd_host         = "fluentd.karlo.internal"
+# Thirty days, not the seven-day default: nothing runs at fluentd.karlo.internal
+# in production yet, so CloudWatch is the only copy. Storage is $0.03/GB-month.
+log_retention_days   = 30
 
 # The authentication service is on the path of every request in both products,
 # so it gets a larger baseline than the others and never runs as a single task.
