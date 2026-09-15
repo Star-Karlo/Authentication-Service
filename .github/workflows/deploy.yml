@@ -76,8 +76,17 @@ jobs:
           DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           IMAGE="$REGISTRY/$ECR_REPOSITORY:sha-${DEPLOY_SHA::12}"
-          docker build -t "$IMAGE" .
-          docker push "$IMAGE"
+          # Tags are immutable, and a redeploy of a commit already built
+          # (a manual dispatch to roll a config change, or a rollback) must
+          # reuse its image rather than fail trying to overwrite it. The
+          # same commit is the same image.
+          if aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+               --image-ids imageTag="sha-${DEPLOY_SHA::12}" >/dev/null 2>&1; then
+            echo "image already in ECR, reusing: $IMAGE"
+          else
+            docker build -t "$IMAGE" .
+            docker push "$IMAGE"
+          fi
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
 
       # The task definition is owned by Terraform, which ignores changes to its
