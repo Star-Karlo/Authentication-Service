@@ -35,6 +35,15 @@ service MasterDataService {
   rpc GetTruck(GetTruckRequest) returns (GetTruckResponse);
   rpc ListTrucks(ListTrucksRequest) returns (ListTrucksResponse);
 
+  // ListDrivers pages a company's driver register, for a service that keeps
+  // a projection of it — FMS's driversync. updated_since makes it
+  // incremental; deleted rows are included so a projection can retire them.
+  rpc ListDrivers(ListDriversRequest) returns (ListDriversResponse);
+
+  // GetDriver resolves one driver by master-data id — the business service
+  // reads the phone and the optional login when it assigns work.
+  rpc GetDriver(GetDriverRequest) returns (GetDriverResponse);
+
   // GetTrucksByDriver supports the assign-driver flow in the business service,
   // which must know which trucks a driver is paired with.
   rpc GetTrucksByDriver(GetTrucksByDriverRequest) returns (GetTrucksByDriverResponse);
@@ -187,6 +196,50 @@ message GetTruckRequest {
 
 message GetTruckResponse {
   Truck truck = 1;
+}
+
+message ListDriversRequest {
+  string company_id = 1;
+  // page is zero-based; page_size defaults to 200 and is capped at 1000.
+  int32 page = 2;
+  int32 page_size = 3;
+  // updated_since, when set, returns only drivers changed at or after it.
+  google.protobuf.Timestamp updated_since = 4;
+}
+
+message ListDriversResponse {
+  repeated Driver drivers = 1;
+  int64 total = 2;
+}
+
+message GetDriverRequest {
+  string id = 1;
+}
+
+message GetDriverResponse {
+  Driver driver = 1;
+}
+
+message Driver {
+  string id = 1;
+  string company_id = 2;
+  string full_name = 3;
+  string phone = 4;
+  string employee_no = 5;
+  string license_no = 6;
+  string license_class = 7;
+  // license_expiry is a date, carried at UTC midnight.
+  google.protobuf.Timestamp license_expiry = 8;
+  // status is active or inactive.
+  string status = 9;
+  // user_id is the auth user when this person has a login; empty otherwise.
+  string user_id = 10;
+  // fms_employee_id is the FMS alias stamped at import or by FMS's own sync;
+  // 0 when this driver never existed in FMS.
+  int64 fms_employee_id = 11;
+  bool deleted = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp updated_at = 14;
 }
 
 message ListTrucksRequest {

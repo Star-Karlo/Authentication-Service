@@ -46,13 +46,21 @@ resource "aws_ecs_task_definition" "main" {
           { name = "BUSINESS_GRPC_ADDR", value = "business.karlo.internal:6003" },
           { name = "NOTIFICATION_GRPC_ADDR", value = "notification.karlo.internal:6004" },
 
-          { name = "REDIS_ADDR", value = "${local.platform.redis_endpoint}:6379" },
-          # ElastiCache has encryption in transit enabled, so the client must
-          # use TLS or every connection is refused.
-          { name = "REDIS_TLS", value = "true" },
+          # Empty when the platform runs no cache; the service then starts
+          # without one. ElastiCache enforces TLS, the in-cluster container
+          # does not speak it, so the flag follows the platform's choice.
+          { name = "REDIS_ADDR", value = local.platform.redis_endpoint == "" ? "" : "${local.platform.redis_endpoint}:6379" },
+          { name = "REDIS_TLS", value = tostring(try(local.platform.redis_tls, false)) },
 
           { name = "FLUENTD_HOST", value = var.fluentd_host },
           { name = "CORS_ALLOWED_ORIGINS", value = join(",", var.cors_allowed_origins) },
+
+          # Gin trusts X-Forwarded-For from any address unless told which
+          # proxies to believe: the VPC (the load balancer) and CloudFront's
+          # edges, which the platform computes. Empty (a platform state
+          # without the output yet) keeps Gin's default, so this is safe to
+          # apply in either order.
+          { name = "TRUSTED_PROXIES", value = try(local.platform.trusted_proxy_cidrs, "") },
         ],
         var.extra_environment,
       )

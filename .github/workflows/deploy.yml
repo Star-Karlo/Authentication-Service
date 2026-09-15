@@ -11,8 +11,15 @@
 
 name: Deploy
 
+# Runs after CI, not alongside it. A push to main used to trigger both
+# workflows at once, so a red test run still rolled to production; now the
+# deploy starts only when CI has finished green on that commit. A manual
+# dispatch skips the gate deliberately — for a rollback or a redeploy of a
+# commit CI has already passed.
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
@@ -38,11 +45,16 @@ env:
 
 jobs:
   deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
+      # On a workflow_run the checkout must name the commit CI tested; the
+      # default would be whatever main points at by the time this starts.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Assume the deploy role
         uses: aws-actions/configure-aws-credentials@v4
@@ -61,8 +73,9 @@ jobs:
         id: build
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
-          IMAGE="$REGISTRY/$ECR_REPOSITORY:sha-${GITHUB_SHA::12}"
+          IMAGE="$REGISTRY/$ECR_REPOSITORY:sha-${DEPLOY_SHA::12}"
           docker build -t "$IMAGE" .
           docker push "$IMAGE"
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"

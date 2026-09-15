@@ -6,6 +6,7 @@
 package routes
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -50,6 +51,16 @@ func Setup(d Deps) *gin.Engine {
 	}
 
 	router := gin.New()
+	// Behind a load balancer every request arrives from a VPC address with the
+	// real client in X-Forwarded-For. Gin trusts that header from anyone by
+	// default, which lets a caller choose the IP the audit log records. When
+	// the operator names the proxies, trust only those; an unset list keeps
+	// the default, so this is opt-in and changes nothing until configured.
+	if len(d.Config.TrustedProxies) > 0 {
+		if err := router.SetTrustedProxies(d.Config.TrustedProxies); err != nil {
+			panic(fmt.Sprintf("routes: TRUSTED_PROXIES: %v", err))
+		}
+	}
 	router.Use(gin.Recovery())
 	router.Use(middleware.RequestLogger())
 

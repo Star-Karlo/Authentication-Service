@@ -54,6 +54,11 @@ type Config struct {
 
 	CORSAllowedOrigins []string
 
+	// TrustedProxies is the CIDR list Gin trusts for X-Forwarded-For.
+	// Empty keeps Gin's default of trusting every proxy, so an unset variable
+	// changes nothing; set it to the VPC CIDR behind a load balancer.
+	TrustedProxies []string
+
 	// LoginRateLimit caps failed login attempts per identifier per window.
 	LoginRateLimit  int
 	LoginRateWindow time.Duration
@@ -110,6 +115,7 @@ func Load() (*Config, error) {
 		NotificationGRPCAddr: envOr("NOTIFICATION_GRPC_ADDR", "localhost:6004"),
 
 		CORSAllowedOrigins: splitOr("CORS_ALLOWED_ORIGINS", nil),
+		TrustedProxies:     splitOr("TRUSTED_PROXIES", nil),
 
 		LoginRateLimit:  intOr("LOGIN_RATE_LIMIT", 5),
 		LoginRateWindow: durationOr("LOGIN_RATE_WINDOW", 15*time.Minute),
@@ -150,10 +156,23 @@ func Load() (*Config, error) {
 }
 
 // IsProduction reports whether production safety rules apply.
-func (c *Config) IsProduction() bool { return c.Environment == "production" }
+//
+// Terraform validates its environment variable as dev/staging/prod and passes
+// it through unchanged, so the container sees ENVIRONMENT=prod. Matching only
+// "production" left every production task with Swagger served, gRPC
+// reflection on and every SQL statement logged. Both spellings are production.
+func (c *Config) IsProduction() bool { return isProductionEnv(c.Environment) }
+
+func isProductionEnv(env string) bool {
+	switch strings.ToLower(strings.TrimSpace(env)) {
+	case "production", "prod":
+		return true
+	}
+	return false
+}
 
 func sslDefault(env string) string {
-	if env == "production" {
+	if isProductionEnv(env) {
 		return "require"
 	}
 	return "disable"

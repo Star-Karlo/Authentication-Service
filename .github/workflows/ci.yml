@@ -30,6 +30,14 @@ jobs:
       - name: Unit tests
         run: go test ./... -race -cover
 
+      # Known vulnerabilities in the dependency graph, reported only where the
+      # vulnerable symbol is actually reachable from this code, so it does not
+      # cry wolf over a transitive package we never call into.
+      - name: Vulnerability check
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
       # Built with the same toolchain the code targets: a prebuilt binary
       # compiled with an older Go refuses to load a newer go.mod.
       - name: Lint

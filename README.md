@@ -217,3 +217,38 @@ message. `make test-integration-up` creates `karlo_auth_test`.
 The browser is served only outside production: the document describes every
 endpoint and response shape, which is the reconnaissance an attacker would
 otherwise have to guess at. A test asserts it 404s when `ENVIRONMENT=production`.
+
+## Production mode and proxies
+
+`IsProduction()` is true for `ENVIRONMENT=production` **or** `ENVIRONMENT=prod`,
+case-insensitive. Terraform passes its `environment` variable through as
+`prod`, and while only the long form was accepted the deployed task matched
+neither — Swagger served, gRPC reflection on, Gin in debug mode, every SQL
+statement logged. `internal/config/config_test.go` pins both spellings.
+
+`TRUSTED_PROXIES` is an optional comma-separated list of CIDRs handed to Gin's
+`SetTrustedProxies`. Behind the load balancer every request arrives from a VPC
+address with the real client in `X-Forwarded-For`, and Gin believes that header
+from anyone by default, which lets a caller pick the IP the audit log records.
+Terraform sets it from the platform's `trusted_proxy_cidrs` output; unset
+locally, Gin's default (trust every proxy) applies and nothing changes.
+
+## CI and deploy
+
+`.github/workflows/ci.yml` runs on every pull request and push: `build`
+(build, vet, `go test -race`, golangci-lint, then `govulncheck ./...`),
+`contracts`, `integration`, `swagger` and `docker`. `govulncheck` fails the
+build on a vulnerability the binary can actually reach; `go.mod` is on
+`1.25.14` because that is where the last batch was cleared.
+
+`.github/workflows/deploy.yml` runs only after CI completes successfully on
+`main` (`workflow_run`), or by hand (`workflow_dispatch`), and checks out the
+commit CI passed (`workflow_run.head_sha`) rather than the tip of `main`. It
+used to fire on the push itself, alongside CI, so a red build did not stop a
+deploy.
+
+`terraform/alarms.tf` adds three CloudWatch alarms — no healthy target for two
+minutes, more than 20 target 5xx in five minutes, CPU above 85% for fifteen
+minutes — publishing to the platform's `karlo-<env>-alerts` topic through
+`try(local.platform.alerts_topic_arn, "")`. Applied against a platform state
+older than the topic, they exist but tell nobody; re-apply after the platform.
