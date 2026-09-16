@@ -133,6 +133,11 @@ type profileRequest struct {
 	CompanyProfile *string                 `json:"companyProfile"`
 	BankAccount    *map[string]interface{} `json:"bankAccount"`
 	Profile        *map[string]interface{} `json:"profile"`
+	// Settings.tripAllowance is the only setting the console edits here;
+	// the business toggles stay staff-only.
+	Settings *struct {
+		TripAllowance *map[string]interface{} `json:"tripAllowance"`
+	} `json:"settings"`
 }
 
 // maxProfileBody bounds the profile request: a compressed logo data URL is
@@ -249,6 +254,17 @@ func (h *CompanyHandler) updateProfile(c *gin.Context, id uuid.UUID) {
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
+	}
+	if req.Settings != nil && req.Settings.TripAllowance != nil {
+		// Settings is one JSONB column: read, replace the one key, write.
+		current, err := h.companies.FindByID(c.Request.Context(), id)
+		if err != nil {
+			response.NotFound(c, "Company not found")
+			return
+		}
+		settings := current.Settings
+		settings.TripAllowance = *req.Settings.TripAllowance
+		fields["settings"] = settings
 	}
 	if err := h.companies.UpdateFields(c.Request.Context(), id, fields); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {

@@ -113,6 +113,12 @@ type CompanySettings struct {
 	UseStrictAgreement               bool    `json:"useStrictAgreement"`
 	MaxDriverAvailableAfterOrderDone int     `json:"maxDriverAvailableAfterOrderDone"`
 	AccessTolls                      bool    `json:"accessTolls"`
+
+	// TripAllowance is the console's Trip Allowance > Configuration: fuel,
+	// meal and lodging rules the pre-trip Uang Sangu is computed from. Kept
+	// free-form because the console owns the formula; the services only
+	// carry the numbers to whoever computes it.
+	TripAllowance map[string]interface{} `json:"tripAllowance,omitempty"`
 }
 
 func (s CompanySettings) Value() (driver.Value, error) { return json.Marshal(s) }
