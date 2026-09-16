@@ -112,6 +112,10 @@ const (
 	EventType_EVENT_TYPE_TASK_ASSIGNED              EventType = 22
 	EventType_EVENT_TYPE_CHAT_MESSAGE               EventType = 23
 	EventType_EVENT_TYPE_OTP                        EventType = 24
+	// A planner registered a driver's K-Trip account: the driver gets the app
+	// link and their credentials on WhatsApp. No in-app copy — there is no
+	// inbox yet to put it in.
+	EventType_EVENT_TYPE_DRIVER_ACCOUNT_CREATED EventType = 25
 )
 
 // Enum value maps for EventType.
@@ -142,6 +146,7 @@ var (
 		22: "EVENT_TYPE_TASK_ASSIGNED",
 		23: "EVENT_TYPE_CHAT_MESSAGE",
 		24: "EVENT_TYPE_OTP",
+		25: "EVENT_TYPE_DRIVER_ACCOUNT_CREATED",
 	}
 	EventType_value = map[string]int32{
 		"EVENT_TYPE_UNSPECIFIED":                0,
@@ -169,6 +174,7 @@ var (
 		"EVENT_TYPE_TASK_ASSIGNED":              22,
 		"EVENT_TYPE_CHAT_MESSAGE":               23,
 		"EVENT_TYPE_OTP":                        24,
+		"EVENT_TYPE_DRIVER_ACCOUNT_CREATED":     25,
 	}
 )
 
@@ -1938,7 +1944,7 @@ const file_karlo_notification_v1_notification_proto_rawDesc = "" +
 	"\x0eCHANNEL_IN_APP\x10\x01\x12\x10\n" +
 	"\fCHANNEL_PUSH\x10\x02\x12\x11\n" +
 	"\rCHANNEL_EMAIL\x10\x03\x12\x14\n" +
-	"\x10CHANNEL_WHATSAPP\x10\x04*\xd1\x06\n" +
+	"\x10CHANNEL_WHATSAPP\x10\x04*\xf8\x06\n" +
 	"\tEventType\x12\x1a\n" +
 	"\x16EVENT_TYPE_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18EVENT_TYPE_ORDER_CREATED\x10\x01\x12\x1c\n" +
@@ -1965,7 +1971,8 @@ const file_karlo_notification_v1_notification_proto_rawDesc = "" +
 	"\x1eEVENT_TYPE_TRUCK_DRIVER_PAIRED\x10\x15\x12\x1c\n" +
 	"\x18EVENT_TYPE_TASK_ASSIGNED\x10\x16\x12\x1b\n" +
 	"\x17EVENT_TYPE_CHAT_MESSAGE\x10\x17\x12\x12\n" +
-	"\x0eEVENT_TYPE_OTP\x10\x182\xbd\a\n" +
+	"\x0eEVENT_TYPE_OTP\x10\x18\x12%\n" +
+	"!EVENT_TYPE_DRIVER_ACCOUNT_CREATED\x10\x192\xbd\a\n" +
 	"\x13NotificationService\x12U\n" +
 	"\x06Notify\x12$.karlo.notification.v1.NotifyRequest\x1a%.karlo.notification.v1.NotifyResponse\x12d\n" +
 	"\vNotifyBatch\x12).karlo.notification.v1.NotifyBatchRequest\x1a*.karlo.notification.v1.NotifyBatchResponse\x12v\n" +

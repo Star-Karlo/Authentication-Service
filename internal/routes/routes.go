@@ -36,6 +36,7 @@ type Deps struct {
 
 	Catalog     *handlers.CatalogHandler
 	Shippers    *handlers.ShipperHandler
+	Drivers     *handlers.DriverAccountHandler
 	Merges      *handlers.MergeHandler
 	Auth        *handlers.AuthHandler
 	User        *handlers.UserHandler
@@ -170,6 +171,20 @@ func registerProtected(api *gin.RouterGroup, d Deps) {
 			authctx.RequireModule("collaboration.inviteMember"),
 			d.Catalog.SetLabel)
 	}
+
+	// Driver logins for K-Trip. Registering one is inviting a member, so it
+	// takes that permission; reading the list takes the same as user
+	// management.
+	if d.Drivers != nil {
+		drivers := protected.Group("/drivers/accounts")
+		drivers.GET("", authctx.RequireModule("collaboration.manageMember"), d.Drivers.List)
+		drivers.GET("/lookup", authctx.RequireModule("collaboration.inviteMember"), d.Drivers.Lookup)
+		drivers.POST("", authctx.RequireModule("collaboration.inviteMember"), d.Drivers.Create)
+		drivers.POST("/:id/adopt", authctx.RequireModule("collaboration.inviteMember"), d.Drivers.Adopt)
+	}
+
+	// The reverse of /shippers: which transporters a shipper deals with.
+	protected.GET("/transporters", d.Shippers.ListTransporters)
 
 	shippers := protected.Group("/shippers")
 	{

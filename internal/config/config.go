@@ -62,6 +62,9 @@ type Config struct {
 	AcceptedServiceTokens []string
 
 	NotificationGRPCAddr string
+	// DriverAppLink is where a newly registered driver is sent to install
+	// K-Trip; it goes into the WhatsApp message.
+	DriverAppLink string
 
 	CORSAllowedOrigins []string
 
@@ -124,6 +127,7 @@ func Load() (*Config, error) {
 		BcryptCost:      intOr("BCRYPT_COST", 12),
 
 		NotificationGRPCAddr: envOr("NOTIFICATION_GRPC_ADDR", "localhost:6004"),
+		DriverAppLink:        envOr("DRIVER_APP_LINK", "https://play.google.com/store/apps/details?id=id.karlo.ktrip"),
 
 		CORSAllowedOrigins: splitOr("CORS_ALLOWED_ORIGINS", nil),
 		TrustedProxies:     splitOr("TRUSTED_PROXIES", nil),

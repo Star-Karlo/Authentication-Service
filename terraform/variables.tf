@@ -124,8 +124,10 @@ variable "path_patterns" {
   # present in only one of the two works locally and 404s behind the load
   # balancer, or the reverse — and neither failure appears until the environment
   # the path is missing from is exercised.
-  type    = list(string)
-  default = ["/api/v1/auth*", "/api/v1/users*", "/api/v1/admin*", "/api/v1/shippers*", "/api/v1/permissions*", "/api/v1/roles*"]
+  type = list(string)
+  # /drivers/accounts* is here and /drivers* is master data's: the auth
+  # rules have the lower priority number, so the more specific path wins.
+  default = ["/api/v1/auth*", "/api/v1/users*", "/api/v1/admin*", "/api/v1/shippers*", "/api/v1/permissions*", "/api/v1/roles*", "/api/v1/transporters*", "/api/v1/drivers/accounts*"]
 }
 
 variable "cors_allowed_origins" {

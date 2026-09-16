@@ -113,6 +113,27 @@ func (h *ShipperHandler) List(c *gin.Context) {
 	response.OK(c, shippers)
 }
 
+// ListTransporters lists the transporters linked to the caller's company —
+// the vendors a shipper works with.
+//
+// @Summary  List my transporters
+// @Tags     Shippers
+// @Security BearerAuth
+// @Success  200 {array} models.Company
+// @Router   /transporters [get]
+func (h *ShipperHandler) ListTransporters(c *gin.Context) {
+	companyID, ok := scopeCompany(c)
+	if !ok {
+		return
+	}
+	out, err := h.shippers.ListTransporters(c.Request.Context(), companyID)
+	if err != nil {
+		response.InternalError(c, "Could not list your transporters.")
+		return
+	}
+	response.OK(c, out)
+}
+
 // IssueClaimLink generates the link a shipper uses to take ownership.
 //
 // The token is returned ONCE, here, and never stored — only its hash is kept.

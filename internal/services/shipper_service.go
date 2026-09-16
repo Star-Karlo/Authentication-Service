@@ -204,6 +204,21 @@ func (s *ShipperService) ListShippers(ctx context.Context, transporterID uuid.UU
 	return out, nil
 }
 
+// ListTransporters is the other side of the same link: the 3PL vendors a
+// shipper deals with, for its Transporter List.
+func (s *ShipperService) ListTransporters(ctx context.Context, shipperID uuid.UUID) ([]models.Company, error) {
+	var out []models.Company
+	err := s.db.WithContext(ctx).
+		Joins("JOIN company_links l ON l.transporter_company_id = companies.id").
+		Where("l.shipper_company_id = ? AND companies.deleted_at IS NULL", shipperID).
+		Order("companies.name").
+		Find(&out).Error
+	if err != nil {
+		return nil, fmt.Errorf("list transporters: %w", err)
+	}
+	return out, nil
+}
+
 // ---------------------------------------------------------------------------
 // Claiming
 // ---------------------------------------------------------------------------

@@ -98,6 +98,10 @@ enum EventType {
   EVENT_TYPE_TASK_ASSIGNED = 22;
   EVENT_TYPE_CHAT_MESSAGE = 23;
   EVENT_TYPE_OTP = 24;
+  // A planner registered a driver's K-Trip account: the driver gets the app
+  // link and their credentials on WhatsApp. No in-app copy — there is no
+  // inbox yet to put it in.
+  EVENT_TYPE_DRIVER_ACCOUNT_CREATED = 25;
 }
 
 // Audience states who should receive a notification. Exactly one field is set.

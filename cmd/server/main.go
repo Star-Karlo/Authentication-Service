@@ -18,6 +18,7 @@ import (
 	"github.com/karlo/authentication-service/internal/platform/bootstrap"
 	"github.com/karlo/authentication-service/internal/platform/dbmigrate"
 
+	"github.com/karlo/authentication-service/internal/clients"
 	"github.com/karlo/authentication-service/internal/config"
 	"github.com/karlo/authentication-service/internal/grpcserver"
 	"github.com/karlo/authentication-service/internal/handlers"
@@ -195,6 +196,17 @@ func run() error {
 		grpcserver.New(authService, userService, companyRepo, accessRepo, deviceRepo, userRepo),
 	)
 
+	// Driver onboarding: WhatsApp to the driver goes through the notification
+	// service; unreachable means the credentials are shown once in the console
+	// and handed over by hand.
+	var driverNotifier clients.Notifier = clients.NoopNotifier{}
+	if n, err := clients.NewNotification(cfg.NotificationGRPCAddr, cfg.ServiceToken, 5*time.Second); err != nil {
+		slog.Warn("notification service unreachable; driver credentials will not be sent", "error", err)
+	} else {
+		driverNotifier = n
+	}
+	driverAccounts := services.NewDriverAccountService(userRepo, roleRepo, companyRepo, userService.Register, driverNotifier, cfg.DriverAppLink)
+
 	router := routes.Setup(routes.Deps{
 		Config:   cfg,
 		Verifier: signer.Public(),
@@ -205,6 +217,7 @@ func run() error {
 		Revocations: revocationChecker,
 		Catalog:     handlers.NewCatalogHandler(catalogRepo),
 		Shippers:    handlers.NewShipperHandler(shipperService, authService.HashPassword),
+		Drivers:     handlers.NewDriverAccountHandler(driverAccounts),
 		Merges:      handlers.NewMergeHandler(mergeService),
 		Auth:        handlers.NewAuthHandler(authService, userService),
 		User:        handlers.NewUserHandler(userService),
