@@ -135,7 +135,11 @@ type registerRequest struct {
 	Phone       string `json:"phone"`
 	Password    string `json:"password" binding:"required"`
 	FullName    string `json:"fullName"`
-	Role        string `json:"role" binding:"required"`
+	// Role is the company's side of the market (shipper / transporter) and
+	// is required only when a registration creates a company; a member
+	// invited into an existing company gets access from roleId. The service
+	// enforces which case needs it, so the binding does not.
+	Role string `json:"role"`
 	CompanyName string `json:"companyName"`
 	// CompanyAbbreviation goes into every agreement number this company is
 	// party to (AGR-KP-MAS-000101), so it belongs on the company from the
