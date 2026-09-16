@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"math"
+	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -124,7 +125,19 @@ type profileRequest struct {
 	Email      *string `json:"email"`
 	Website    *string `json:"website"`
 	LogoKey    *string `json:"logoKey"`
+	// The console's Profil Perusahaan edits these too. LogoURL is the
+	// legacy public-URL column; the console stores a small compressed data
+	// URL there, which is why the request body is capped in the handler.
+	LogoURL        *string                 `json:"logoUrl"`
+	NPWP           *string                 `json:"npwp"`
+	CompanyProfile *string                 `json:"companyProfile"`
+	BankAccount    *map[string]interface{} `json:"bankAccount"`
+	Profile        *map[string]interface{} `json:"profile"`
 }
+
+// maxProfileBody bounds the profile request: a compressed logo data URL is
+// tens of kilobytes, and nothing else on the form is large.
+const maxProfileBody = 512 << 10
 
 func (r profileRequest) fields() (map[string]interface{}, error) {
 	out := map[string]interface{}{}
@@ -146,6 +159,15 @@ func (r profileRequest) fields() (map[string]interface{}, error) {
 	set("email", r.Email)
 	set("website", r.Website)
 	set("logo_key", r.LogoKey)
+	set("logo_url", r.LogoURL)
+	set("npwp", r.NPWP)
+	set("company_profile", r.CompanyProfile)
+	if r.BankAccount != nil {
+		out["bank_account"] = models.JSONMap(*r.BankAccount)
+	}
+	if r.Profile != nil {
+		out["profile"] = models.JSONMap(*r.Profile)
+	}
 	if r.Country != nil {
 		cc := strings.ToUpper(strings.TrimSpace(*r.Country))
 		if len(cc) != 2 {
@@ -218,6 +240,7 @@ func (h *CompanyHandler) Update(c *gin.Context) {
 
 func (h *CompanyHandler) updateProfile(c *gin.Context, id uuid.UUID) {
 	var req profileRequest
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxProfileBody)
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, err.Error())
 		return

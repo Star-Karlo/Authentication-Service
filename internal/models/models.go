@@ -189,9 +189,12 @@ type Company struct {
 	LogoURL   *string `gorm:"column:logo_url" json:"logoUrl,omitempty"`
 	BannerURL *string `gorm:"column:banner_url" json:"bannerUrl,omitempty"`
 
-	Settings        CompanySettings `gorm:"type:jsonb" json:"settings"`
-	BankAccount     JSONMap         `gorm:"type:jsonb" json:"bankAccount,omitempty"`
-	EmailRecipients StringArray     `gorm:"type:text[]" json:"emailRecipients"`
+	Settings    CompanySettings `gorm:"type:jsonb" json:"settings"`
+	BankAccount JSONMap         `gorm:"type:jsonb" json:"bankAccount,omitempty"`
+	// Profile is the rest of the profile screen — founded year, service
+	// types, regions, PIC, NIB, KPP — which nothing queries or prints.
+	Profile         JSONMap     `gorm:"type:jsonb" json:"profile"`
+	EmailRecipients StringArray `gorm:"type:text[]" json:"emailRecipients"`
 
 	IsVerified  bool `gorm:"not null;default:false" json:"isVerified"`
 	IsSuspended bool `gorm:"not null;default:false" json:"isSuspended"`
