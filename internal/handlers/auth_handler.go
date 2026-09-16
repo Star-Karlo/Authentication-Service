@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -250,6 +251,19 @@ func (h *AuthHandler) RegisterMember(c *gin.Context) {
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
+	}
+
+	// Staff begets staff, and only inside Karlo's own company: a member a
+	// platform-staff caller creates into their OWN company (Karlo Platform
+	// — no X-Acting-For, or acting for it explicitly) is platform staff. A
+	// member created into a customer's company never is.
+	if principal.IsPlatformStaff && input.CompanyID != nil && principal.CompanyID == input.CompanyID.String() {
+		if err := h.users.GrantPlatformStaff(c.Request.Context(), parentID, user.ID); err != nil {
+			slog.ErrorContext(c.Request.Context(), "platform staff flag not set on new member",
+				"userId", user.ID, "error", err)
+		} else {
+			user.IsPlatformStaff = true
+		}
 	}
 
 	response.Created(c, user)

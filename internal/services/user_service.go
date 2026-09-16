@@ -841,3 +841,25 @@ func abbreviationOrNil(s string) *string {
 	}
 	return &s
 }
+
+// GrantPlatformStaff marks a user as Karlo staff. Called by RegisterMember
+// under one rule, decided by the platform owner: a user a staff member
+// creates INTO Karlo's own company is staff; a user created into any
+// customer's company — by staff acting for it, or by the customer's own
+// administrator — is not, whatever role they hold. The audit row is what
+// lets "who made this person staff" be answered later.
+func (s *UserService) GrantPlatformStaff(ctx context.Context, actorID, userID uuid.UUID) error {
+	if err := s.users.UpdateFields(ctx, userID, map[string]interface{}{"is_platform_staff": true}); err != nil {
+		return fmt.Errorf("grant platform staff: %w", err)
+	}
+	if s.audit != nil {
+		_ = s.audit.Write(ctx, &models.AuditEntry{
+			UserID:      &userID,
+			ActorUserID: &actorID,
+			Event:       "platform_staff.granted",
+			Succeeded:   true,
+			Detail:      models.JSONMap{"reason": "created into the platform company by platform staff"},
+		})
+	}
+	return nil
+}
