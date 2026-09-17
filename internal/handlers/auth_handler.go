@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -19,10 +20,65 @@ import (
 type AuthHandler struct {
 	auth  *services.AuthService
 	users *services.UserService
+	// cookies is the shared browser session; nil when SESSION_COOKIE_DOMAIN
+	// is unset.
+	cookies *sessionCookies
 }
 
-func NewAuthHandler(auth *services.AuthService, users *services.UserService) *AuthHandler {
-	return &AuthHandler{auth: auth, users: users}
+func NewAuthHandler(auth *services.AuthService, users *services.UserService, cookieDomain string, refreshTTL time.Duration) *AuthHandler {
+	h := &AuthHandler{auth: auth, users: users}
+	if cookieDomain != "" {
+		h.cookies = &sessionCookies{domain: cookieDomain, maxAge: int(refreshTTL.Seconds())}
+	}
+	return h
+}
+
+// sessionCookies is the one sign-in shared by every Karlo app on the parent
+// domain. The refresh token rides in an HttpOnly cookie no script can read;
+// a visible marker beside it lets each app's page notice, within a second,
+// that another app signed out. Both are set on login and on every refresh
+// (the refresh token rotates), and cleared on logout. The attributes are
+// pinned — FMS's API sets the identical cookies — so the browser holds one
+// value that either side may rotate.
+type sessionCookies struct {
+	domain string
+	maxAge int
+}
+
+const (
+	refreshCookie = "karlo_rt"
+	markerCookie  = "karlo_session"
+)
+
+func (s *sessionCookies) set(c *gin.Context, refreshToken string) {
+	if s == nil {
+		return
+	}
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(refreshCookie, refreshToken, s.maxAge, "/", s.domain, true, true)
+	c.SetCookie(markerCookie, "1", s.maxAge, "/", s.domain, true, false)
+}
+
+func (s *sessionCookies) clear(c *gin.Context) {
+	if s == nil {
+		return
+	}
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(refreshCookie, "", -1, "/", s.domain, true, true)
+	c.SetCookie(markerCookie, "", -1, "/", s.domain, true, false)
+}
+
+// fromCookie is the refresh token the browser holds, when the body carries
+// none.
+func (s *sessionCookies) fromCookie(c *gin.Context) string {
+	if s == nil {
+		return ""
+	}
+	v, err := c.Cookie(refreshCookie)
+	if err != nil {
+		return ""
+	}
+	return v
 }
 
 type loginRequest struct {
@@ -95,6 +151,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 			return
 		}
 	}
+
+	h.cookies.set(c, result.Tokens.RefreshToken)
 
 	// The same identity shape as /auth/me, so a client parses one thing rather
 	// than reconciling two.
@@ -282,20 +340,30 @@ func (h *AuthHandler) RegisterMember(c *gin.Context) {
 // @Success  200 {object} services.TokenPair
 // @Router   /auth/refresh [post]
 func (h *AuthHandler) Refresh(c *gin.Context) {
+	// The token comes in the body (a native or legacy client) or, for a
+	// browser on the shared domain, in the HttpOnly cookie — a body of {}.
 	var req struct {
-		RefreshToken string `json:"refreshToken" binding:"required"`
+		RefreshToken string `json:"refreshToken"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, err.Error())
+	_ = c.ShouldBindJSON(&req)
+	if req.RefreshToken == "" {
+		req.RefreshToken = h.cookies.fromCookie(c)
+	}
+	if req.RefreshToken == "" {
+		response.BadRequest(c, "refreshToken is required")
 		return
 	}
 
 	tokens, err := h.auth.Refresh(c.Request.Context(), req.RefreshToken)
 	if err != nil {
+		// A refresh that fails is a session that is over; do not leave the
+		// browser holding a cookie that will fail again.
+		h.cookies.clear(c)
 		writeAuthError(c, err)
 		return
 	}
 
+	h.cookies.set(c, tokens.RefreshToken)
 	response.OK(c, tokens)
 }
 
@@ -325,6 +393,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	}
 
 	// An API-key principal has no session to revoke.
+	h.cookies.clear(c)
 	if principal.TokenID == "" {
 		response.OKWithMessage(c, "Logged out", nil)
 		return
@@ -362,6 +431,7 @@ func (h *AuthHandler) LogoutAll(c *gin.Context) {
 		return
 	}
 
+	h.cookies.clear(c)
 	response.OKWithMessage(c, "Logged out everywhere", gin.H{"revokedSessions": n})
 }
 

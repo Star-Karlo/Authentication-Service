@@ -219,7 +219,7 @@ func run() error {
 		Shippers:    handlers.NewShipperHandler(shipperService, authService.HashPassword),
 		Drivers:     handlers.NewDriverAccountHandler(driverAccounts),
 		Merges:      handlers.NewMergeHandler(mergeService),
-		Auth:        handlers.NewAuthHandler(authService, userService),
+		Auth:        handlers.NewAuthHandler(authService, userService, cfg.SessionCookieDomain, cfg.RefreshTokenTTL),
 		User:        handlers.NewUserHandler(userService),
 		// The Karlo staff surface for deciding what a company has bought.
 		Entitlement: handlers.NewEntitlementHandler(entitlementService),

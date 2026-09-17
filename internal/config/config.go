@@ -76,6 +76,13 @@ type Config struct {
 	// LoginRateLimit caps failed login attempts per identifier per window.
 	LoginRateLimit  int
 	LoginRateWindow time.Duration
+
+	// SessionCookieDomain switches on the shared browser session across the
+	// Karlo apps: when set (".karlo.id"), login and refresh answer with an
+	// HttpOnly refresh-token cookie and a visible marker on that domain, so
+	// tms.karlo.id and fms.karlo.id share one sign-in and one sign-out.
+	// Empty keeps sessions per app, which is right for localhost.
+	SessionCookieDomain string
 }
 
 type Database struct {
@@ -132,8 +139,9 @@ func Load() (*Config, error) {
 		CORSAllowedOrigins: splitOr("CORS_ALLOWED_ORIGINS", nil),
 		TrustedProxies:     splitOr("TRUSTED_PROXIES", nil),
 
-		LoginRateLimit:  intOr("LOGIN_RATE_LIMIT", 5),
-		LoginRateWindow: durationOr("LOGIN_RATE_WINDOW", 15*time.Minute),
+		LoginRateLimit:      intOr("LOGIN_RATE_LIMIT", 5),
+		SessionCookieDomain: os.Getenv("SESSION_COOKIE_DOMAIN"),
+		LoginRateWindow:     durationOr("LOGIN_RATE_WINDOW", 15*time.Minute),
 
 		ArchiveBucket:        envOr("ARCHIVE_BUCKET", ""),
 		ArchiveRegion:        envOr("ARCHIVE_REGION", envOr("AWS_REGION", "ap-southeast-3")),
