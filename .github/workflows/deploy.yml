@@ -80,8 +80,12 @@ jobs:
           # (a manual dispatch to roll a config change, or a rollback) must
           # reuse its image rather than fail trying to overwrite it. The
           # same commit is the same image.
-          if aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
-               --image-ids imageTag="sha-${DEPLOY_SHA::12}" >/dev/null 2>&1; then
+          # batch-get-image rather than describe-images: it is the read the
+          # deploy role already holds for pulling, and a denied describe
+          # looked like "not built" and tried to overwrite the immutable tag.
+          if aws ecr batch-get-image --repository-name "$ECR_REPOSITORY" \
+               --image-ids imageTag="sha-${DEPLOY_SHA::12}" \
+               --query 'images[0].imageId.imageDigest' --output text 2>/dev/null | grep -q sha256; then
             echo "image already in ECR, reusing: $IMAGE"
           else
             docker build -t "$IMAGE" .
