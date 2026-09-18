@@ -2,9 +2,12 @@ package handlers
 
 import (
 	"net/http"
+
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"github.com/gin-gonic/gin"
 )
@@ -16,12 +19,13 @@ func TestSessionCookiesArePinnedToTheSharedDomain(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, "/auth/login", nil)
-	s.set(c, "rt-secret")
+	uid := uuid.MustParse("11111111-2222-3333-4444-555555555555")
+	s.set(c, "rt-secret", uid)
 
 	got := strings.Join(w.Header().Values("Set-Cookie"), "\n")
 	for _, want := range []string{
 		"karlo_rt=rt-secret", "Domain=karlo.id", "Path=/", "Max-Age=2592000", "HttpOnly", "Secure", "SameSite=Lax",
-		"karlo_session=1",
+		"karlo_session=11111111-2222-3333-4444-555555555555",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("Set-Cookie lacks %q:\n%s", want, got)
@@ -39,7 +43,7 @@ func TestSessionCookiesArePinnedToTheSharedDomain(t *testing.T) {
 	c2, _ := gin.CreateTestContext(w2)
 	c2.Request = httptest.NewRequest(http.MethodPost, "/auth/login", nil)
 	var none *sessionCookies
-	none.set(c2, "x")
+	none.set(c2, "x", uid)
 	if len(w2.Header().Values("Set-Cookie")) != 0 {
 		t.Fatal("no cookie domain must mean no cookies")
 	}

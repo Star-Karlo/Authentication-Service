@@ -35,9 +35,12 @@ func NewAuthHandler(auth *services.AuthService, users *services.UserService, coo
 
 // sessionCookies is the one sign-in shared by every Karlo app on the parent
 // domain. The refresh token rides in an HttpOnly cookie no script can read;
-// a visible marker beside it lets each app's page notice, within a second,
-// that another app signed out. Both are set on login and on every refresh
-// (the refresh token rotates), and cleared on logout. The attributes are
+// a visible marker beside it, carrying the user id, lets each app's page
+// notice within a second that another app signed out (marker gone) or that
+// a different person signed in there (marker changed) — an open tab then
+// follows suit instead of keeping the identity it had. Both are set on
+// login and on every refresh (the refresh token rotates; the marker does
+// not, for the same person), and cleared on logout. The attributes are
 // pinned — FMS's API sets the identical cookies — so the browser holds one
 // value that either side may rotate.
 type sessionCookies struct {
@@ -50,13 +53,13 @@ const (
 	markerCookie  = "karlo_session"
 )
 
-func (s *sessionCookies) set(c *gin.Context, refreshToken string) {
+func (s *sessionCookies) set(c *gin.Context, refreshToken string, userID uuid.UUID) {
 	if s == nil {
 		return
 	}
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(refreshCookie, refreshToken, s.maxAge, "/", s.domain, true, true)
-	c.SetCookie(markerCookie, "1", s.maxAge, "/", s.domain, true, false)
+	c.SetCookie(markerCookie, userID.String(), s.maxAge, "/", s.domain, true, false)
 }
 
 func (s *sessionCookies) clear(c *gin.Context) {
@@ -152,7 +155,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		}
 	}
 
-	h.cookies.set(c, result.Tokens.RefreshToken)
+	h.cookies.set(c, result.Tokens.RefreshToken, result.Tokens.UserID)
 
 	// The same identity shape as /auth/me, so a client parses one thing rather
 	// than reconciling two.
@@ -363,7 +366,7 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 		return
 	}
 
-	h.cookies.set(c, tokens.RefreshToken)
+	h.cookies.set(c, tokens.RefreshToken, tokens.UserID)
 	response.OK(c, tokens)
 }
 

@@ -102,6 +102,10 @@ type TokenPair struct {
 	RefreshToken string    `json:"refreshToken"`
 	ExpiresAt    time.Time `json:"expiresAt"`
 	TokenType    string    `json:"tokenType"`
+	// UserID is whose session this is; the shared-session marker cookie
+	// carries it so an open tab of another Karlo app can tell that a
+	// different person signed in. Not in the body: the client has /auth/me.
+	UserID uuid.UUID `json:"-"`
 }
 
 // LoginResult is the full outcome of a login.
@@ -231,6 +235,7 @@ func (s *AuthService) issueSession(ctx context.Context, user *models.User, in Lo
 			RefreshToken: refreshToken,
 			ExpiresAt:    expiresAt,
 			TokenType:    "Bearer",
+			UserID:       user.ID,
 		},
 		User: user,
 	}, nil
@@ -342,6 +347,7 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*TokenP
 		RefreshToken: newRefresh,
 		ExpiresAt:    expiresAt,
 		TokenType:    "Bearer",
+		UserID:       user.ID,
 	}, nil
 }
 
