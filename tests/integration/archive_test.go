@@ -32,8 +32,11 @@ func TestArchiveMovesOldAuditRowsAndPurgesSessions(t *testing.T) {
 	user := seedUser(t, db, company.ID, "archive@example.com")
 
 	now := time.Now().UTC()
-	old1 := now.Add(-45 * 24 * time.Hour)
-	old2 := now.Add(-40 * 24 * time.Hour)
+	// Anchored at noon: two rows an hour apart must land in ONE daily file,
+	// which a run just before midnight UTC would otherwise split in two.
+	noon := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
+	old1 := noon.Add(-45 * 24 * time.Hour)
+	old2 := noon.Add(-40 * 24 * time.Hour)
 	for _, at := range []time.Time{old1, old1.Add(time.Hour), old2, now.Add(-time.Hour)} {
 		if err := db.Exec(`INSERT INTO auth_audit_log (user_id, event, succeeded, created_at) VALUES (?, 'login', true, ?)`, user.ID, at).Error; err != nil {
 			t.Fatalf("seed audit: %v", err)
