@@ -34,6 +34,10 @@ type createShipperRequest struct {
 	Address      *string `json:"address"`
 	CityID       *string `json:"cityId"`
 	Phone        *string `json:"phone"`
+	// Who to call there, and what they ship. Profile fields, not columns:
+	// shown on the customer list, never queried.
+	PicName        *string `json:"picName"`
+	IndustrySector *string `json:"industrySector"`
 }
 
 // Create records a shipper, or links to an existing one.
@@ -67,14 +71,16 @@ func (h *ShipperHandler) Create(c *gin.Context) {
 
 	result, err := h.shippers.CreateShipper(c.Request.Context(), companyID, actorID,
 		services.CreateShipperInput{
-			Name:         body.Name,
-			Abbreviation: body.Abbreviation,
-			EntityType:   body.EntityType,
-			NPWP:         body.NPWP,
-			NIB:          body.NIB,
-			Address:      body.Address,
-			CityID:       body.CityID,
-			Phone:        body.Phone,
+			Name:           body.Name,
+			Abbreviation:   body.Abbreviation,
+			EntityType:     body.EntityType,
+			NPWP:           body.NPWP,
+			NIB:            body.NIB,
+			Address:        body.Address,
+			CityID:         body.CityID,
+			Phone:          body.Phone,
+			PicName:        body.PicName,
+			IndustrySector: body.IndustrySector,
 		})
 	if err != nil {
 		if errors.Is(err, services.ErrValidation) {

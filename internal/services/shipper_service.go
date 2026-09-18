@@ -73,6 +73,10 @@ type CreateShipperInput struct {
 	Address *string
 	CityID  *string
 	Phone   *string
+
+	// PicName and IndustrySector go into the company's free-form profile.
+	PicName        *string
+	IndustrySector *string
 }
 
 // CreateShipperResult says what happened, because "created" and "you are now
@@ -146,6 +150,8 @@ func (s *ShipperService) CreateShipper(ctx context.Context, transporterID uuid.U
 			NIB:                in.NIB,
 			Address:            in.Address,
 			CityID:             in.CityID,
+			Phone:              in.Phone,
+			Profile:            profileFrom(in),
 			CreatedByCompanyID: &transporterID,
 			Settings: models.CompanySettings{
 				PPNPercentage:   0.02,
@@ -564,4 +570,16 @@ func (s *ShipperService) foldIn(tx *gorm.DB, keepID, loserID uuid.UUID) error {
 		return fmt.Errorf("claim: fold in the duplicate: %w", err)
 	}
 	return nil
+}
+
+// profileFrom is the free-form part of a new customer's record.
+func profileFrom(in CreateShipperInput) models.JSONMap {
+	out := models.JSONMap{}
+	if in.PicName != nil && strings.TrimSpace(*in.PicName) != "" {
+		out["picName"] = strings.TrimSpace(*in.PicName)
+	}
+	if in.IndustrySector != nil && strings.TrimSpace(*in.IndustrySector) != "" {
+		out["industrySector"] = strings.TrimSpace(*in.IndustrySector)
+	}
+	return out
 }
