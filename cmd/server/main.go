@@ -127,7 +127,7 @@ func run() error {
 	}()
 
 	userRepo := repository.NewUserRepository(db)
-	companyRepo := repository.NewCompanyRepository(db)
+	companyRepo := repository.NewCompanyRepository(db).WithNotices(cacheClient)
 	sessionRepo := repository.NewSessionRepository(db)
 	apiKeyRepo := repository.NewAPIKeyRepository(db)
 	deviceRepo := repository.NewDeviceTokenRepository(db)

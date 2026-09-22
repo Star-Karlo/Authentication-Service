@@ -37,6 +37,8 @@ func (Noop) SetIfAbsent(context.Context, string, []byte, time.Duration) (bool, e
 	return false, ErrNoCache
 }
 
+func (Noop) Publish(context.Context, string, []byte) {}
+
 func (Noop) Ping(context.Context) error { return nil }
 
 func (Noop) Close() error { return nil }

@@ -52,6 +52,11 @@ type Cache interface {
 	// a duplicate" is a decision the caller must make.
 	SetIfAbsent(ctx context.Context, key string, value []byte, ttl time.Duration) (bool, error)
 
+	// Publish announces a message on a pub/sub channel. Fire-and-forget: a
+	// failure is logged, never returned — a change notice is a courtesy to
+	// other services and must not fail the write it describes.
+	Publish(ctx context.Context, channel string, payload []byte)
+
 	// Ping reports whether the backend is reachable, for health endpoints.
 	Ping(ctx context.Context) error
 

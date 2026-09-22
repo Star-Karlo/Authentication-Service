@@ -209,6 +209,14 @@ func (r *Redis) SetIfAbsent(ctx context.Context, key string, value []byte, ttl t
 	return won, nil
 }
 
+func (r *Redis) Publish(ctx context.Context, channel string, payload []byte) {
+	ctx, cancel := context.WithTimeout(ctx, r.timeout)
+	defer cancel()
+	if err := r.client.Publish(ctx, channel, payload).Err(); err != nil {
+		slog.WarnContext(ctx, "cache: publish failed", "channel", channel, "error", err)
+	}
+}
+
 func (r *Redis) Ping(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()

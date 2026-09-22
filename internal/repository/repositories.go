@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/karlo/authentication-service/internal/models"
+	"github.com/karlo/authentication-service/internal/platform/cache"
 	"github.com/karlo/authentication-service/internal/platform/query"
 	"github.com/karlo/authentication-service/internal/platform/revocation"
 )
@@ -18,9 +20,36 @@ import (
 // Companies
 // ---------------------------------------------------------------------------
 
-type CompanyRepository struct{ db *gorm.DB }
+type CompanyRepository struct {
+	db *gorm.DB
+	// notices carries change notices to the other platform services (FMS
+	// keeps a projection of tenants); nil until WithNotices is called.
+	notices cache.Cache
+}
 
 func NewCompanyRepository(db *gorm.DB) *CompanyRepository { return &CompanyRepository{db: db} }
+
+// CompanyChangeChannel is the Redis pub/sub channel every company write is
+// announced on: {"kind":"company","id":"<uuid>","op":"create|update"}. The
+// payload is a hint; subscribers re-read what they need (ListForSync).
+const CompanyChangeChannel = "karlo:companies"
+
+// WithNotices turns change notices on.
+func (r *CompanyRepository) WithNotices(c cache.Cache) *CompanyRepository {
+	r.notices = c
+	return r
+}
+
+func (r *CompanyRepository) announce(ctx context.Context, id uuid.UUID, op string) {
+	if r.notices == nil {
+		return
+	}
+	payload, err := json.Marshal(map[string]string{"kind": "company", "id": id.String(), "op": op})
+	if err != nil {
+		return
+	}
+	r.notices.Publish(ctx, CompanyChangeChannel, payload)
+}
 
 // WithTx returns a repository that writes through the given transaction.
 func (r *CompanyRepository) WithTx(tx *gorm.DB) *CompanyRepository {
@@ -53,6 +82,7 @@ func (r *CompanyRepository) Create(ctx context.Context, c *models.Company) error
 		}
 		return fmt.Errorf("repository: create company: %w", err)
 	}
+	r.announce(ctx, c.ID, "create")
 	return nil
 }
 
@@ -69,6 +99,7 @@ func (r *CompanyRepository) AllocateFMSTenantID(ctx context.Context, id uuid.UUI
 	if err != nil {
 		return fmt.Errorf("repository: allocate fms tenant id: %w", err)
 	}
+	r.announce(ctx, id, "update")
 	return nil
 }
 
@@ -83,6 +114,7 @@ func (r *CompanyRepository) UpdateFields(ctx context.Context, id uuid.UUID, fiel
 	if res.RowsAffected == 0 {
 		return ErrNotFound
 	}
+	r.announce(ctx, id, "update")
 	return nil
 }
 
