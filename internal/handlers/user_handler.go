@@ -16,11 +16,60 @@ import (
 )
 
 type UserHandler struct {
-	users *services.UserService
+	users   *services.UserService
+	devices *repository.DeviceTokenRepository
 }
 
 func NewUserHandler(users *services.UserService) *UserHandler {
 	return &UserHandler{users: users}
+}
+
+// WithDevices wires the push-token register in, for the driver app.
+func (h *UserHandler) WithDevices(d *repository.DeviceTokenRepository) *UserHandler {
+	h.devices = d
+	return h
+}
+
+type registerDeviceRequest struct {
+	PushToken string `json:"pushToken" binding:"required"`
+	Platform  string `json:"platform"`
+	DeviceID  string `json:"deviceId"`
+}
+
+// RegisterDevice records the caller's push token (FCM) so the notification
+// service can reach this device. Idempotent per (user, token).
+//
+// @Summary  Register this device for push
+// @Tags     Users
+// @Security BearerAuth
+// @Success  200 {object} response.Envelope
+// @Router   /users/me/devices [post]
+func (h *UserHandler) RegisterDevice(c *gin.Context) {
+	userID, ok := principalUserID(c)
+	if !ok {
+		return
+	}
+	var body registerDeviceRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if h.devices == nil {
+		response.BadRequest(c, "push registration is not available")
+		return
+	}
+	t := &models.DeviceToken{UserID: userID, PushToken: body.PushToken}
+	if body.Platform != "" {
+		t.Platform = &body.Platform
+	}
+	if body.DeviceID != "" {
+		t.DeviceID = &body.DeviceID
+	}
+	if err := h.devices.Upsert(c.Request.Context(), t); err != nil {
+		response.InternalError(c, "could not register device")
+		return
+	}
+	response.OKWithMessage(c, "Device registered", nil)
 }
 
 // List pages accounts. Administrators see everything; anyone else is scoped to

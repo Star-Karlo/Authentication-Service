@@ -213,6 +213,7 @@ func registerProtected(api *gin.RouterGroup, d Deps) {
 	users.GET("", d.User.List)
 	users.GET("/:id", d.User.Get)
 	users.PUT("/me", d.User.UpdateMe)
+	users.POST("/me/devices", d.User.RegisterDevice)
 
 	// Managing a company's own people is the company's job, not Karlo's.
 	//

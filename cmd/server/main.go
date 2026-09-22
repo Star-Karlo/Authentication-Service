@@ -220,7 +220,7 @@ func run() error {
 		Drivers:     handlers.NewDriverAccountHandler(driverAccounts),
 		Merges:      handlers.NewMergeHandler(mergeService),
 		Auth:        handlers.NewAuthHandler(authService, userService, cfg.SessionCookieDomain, cfg.RefreshTokenTTL),
-		User:        handlers.NewUserHandler(userService),
+		User:        handlers.NewUserHandler(userService).WithDevices(deviceRepo),
 		// The Karlo staff surface for deciding what a company has bought.
 		Entitlement: handlers.NewEntitlementHandler(entitlementService),
 		Companies:   handlers.NewCompanyHandler(companyRepo, moduleRepo),
