@@ -651,30 +651,27 @@ func (s *AuthService) writeAudit(ctx context.Context, e *models.AuditEntry) {
 }
 
 // ValidatePasswordStrength enforces the minimum the legacy system had none of.
+//
+// Six characters, and digits alone are fine. Drivers type their password on
+// a phone keypad — the K-Trip app has always asked for a six-digit PIN — and
+// the planner's default for a new driver is 123456, which the driver changes
+// on first login. A rule that demanded letters would refuse every driver
+// password the product is built around.
 func ValidatePasswordStrength(password string) error {
-	if len(password) < 8 {
-		return errors.New("password must be at least 8 characters")
+	if len(password) < MinPasswordLength {
+		return fmt.Errorf("password must be at least %d characters", MinPasswordLength)
 	}
 	if len(password) > 72 {
 		// bcrypt silently truncates beyond 72 bytes, which would make the tail
 		// of a long password meaningless. Reject rather than mislead.
 		return errors.New("password must be at most 72 characters")
 	}
-
-	var hasLetter, hasDigit bool
-	for _, r := range password {
-		switch {
-		case r >= '0' && r <= '9':
-			hasDigit = true
-		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z'):
-			hasLetter = true
-		}
-	}
-	if !hasLetter || !hasDigit {
-		return errors.New("password must contain at least one letter and one digit")
-	}
 	return nil
 }
+
+// MinPasswordLength is the shortest password accepted anywhere: a six-digit
+// PIN, the length a driver types into K-Trip.
+const MinPasswordLength = 6
 
 // generateRefreshToken returns the plaintext token and the hash to store.
 func generateRefreshToken() (token, hash string, err error) {

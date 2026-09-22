@@ -113,6 +113,26 @@ its fourth write. `AccessRepository.permissionArray` maps nil to an empty
 array; `TestRegisterCreatesAUsableCompany` asserts the column reads back
 non-nil.
 
+## Driver logins, and why the password rule is six digits
+
+A driver reaches this service in one of two ways. Either a planner registers
+them (`POST /drivers/accounts`): the username is derived from the driver's
+first name plus the company's initials — `budints`, then `budints01` for a
+second Budi, a sequence rather than a random suffix so a list of drivers reads
+sensibly — and the password defaults to `DefaultDriverPassword`, `123456`,
+which the planner reads out or WhatsApps and the driver changes in the app. Or
+the driver registers from K-Trip (`POST /auth/register-driver`, public): that
+creates a user with **no company, no role and no tenant**
+(`RegisterInput.Unaffiliated`), so a phone cannot stand up a company, and the
+account reaches nothing until a planner looks the username up and adopts it.
+
+`ValidatePasswordStrength` therefore asks for six characters
+(`MinPasswordLength`) and the 72-byte bcrypt ceiling, and nothing about
+composition: K-Trip's password field is a numeric keypad, and a rule demanding
+letters would refuse the product's own default. The one validator is used
+everywhere, the shipper claim included. The reasoning in full is in
+[`../docs/authentication/MODEL.md`](../docs/authentication/MODEL.md#driver-accounts--two-ways-in).
+
 ## Login may carry an optional product
 
 `POST /auth/login` accepts `"product": "tms"`. It **never changes the token** —

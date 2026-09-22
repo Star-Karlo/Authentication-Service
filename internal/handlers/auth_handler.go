@@ -242,6 +242,47 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	response.Created(c, user)
 }
 
+// RegisterDriver is a driver signing up from the K-Trip app.
+//
+// The account belongs to no company: the driver tells their planner the
+// username, the planner looks it up on the onboarding page and adopts it.
+// Until then the login works but reaches no orders. Username, phone and a
+// name are all required — the username is what the planner searches for,
+// and the phone is how the planner recognises the person.
+//
+// @Summary  Register a driver from the K-Trip app
+// @Tags     Auth
+// @Accept   json
+// @Produce  json
+// @Success  201 {object} models.User
+// @Router   /auth/register-driver [post]
+func (h *AuthHandler) RegisterDriver(c *gin.Context) {
+	var req struct {
+		FullName string `json:"fullName" binding:"required"`
+		Username string `json:"username" binding:"required"`
+		Phone    string `json:"phone" binding:"required"`
+		Password string `json:"password" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	user, err := h.users.Register(c.Request.Context(), services.RegisterInput{
+		Username:     strings.ToLower(strings.TrimSpace(req.Username)),
+		Phone:        req.Phone,
+		Password:     req.Password,
+		FullName:     req.FullName,
+		Unaffiliated: true,
+	})
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	response.Created(c, user)
+}
+
 // RegisterMember creates a sub-account under the caller's company.
 //
 // @Summary  Register a company member

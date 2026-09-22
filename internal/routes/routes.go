@@ -129,6 +129,9 @@ func registerPublic(api *gin.RouterGroup, d Deps) {
 
 	auth.POST("/login", d.Auth.Login)
 	auth.POST("/register", d.Auth.Register)
+	// A driver signing up from K-Trip. Public for the same reason login is:
+	// the person has no account yet. Creates no company (see RegisterDriver).
+	auth.POST("/register-driver", d.Auth.RegisterDriver)
 	auth.POST("/refresh", d.Auth.Refresh)
 	auth.GET("/check-available/:kind", d.Auth.CheckAvailability)
 }

@@ -370,8 +370,8 @@ func (s *ShipperService) Claim(ctx context.Context, in ClaimInput, hash func(str
 	if in.Email == "" && in.Phone == "" && in.Username == "" {
 		return nil, fmt.Errorf("%w: one of email, phone or username is required", ErrValidation)
 	}
-	if len(in.Password) < 8 {
-		return nil, fmt.Errorf("%w: the password must be at least 8 characters", ErrValidation)
+	if err := ValidatePasswordStrength(in.Password); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 
 	passwordHash, err := hash(in.Password)

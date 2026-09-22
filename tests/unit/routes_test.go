@@ -173,6 +173,7 @@ func TestPublicRoutesAreReachable(t *testing.T) {
 	public := []struct{ method, path string }{
 		{http.MethodPost, "/api/v1/auth/login"},
 		{http.MethodPost, "/api/v1/auth/register"},
+		{http.MethodPost, "/api/v1/auth/register-driver"},
 		{http.MethodPost, "/api/v1/auth/refresh"},
 		{http.MethodGet, "/api/v1/auth/check-available/email"},
 	}

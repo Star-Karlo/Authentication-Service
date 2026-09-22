@@ -71,6 +71,14 @@ type RegisterInput struct {
 	// Permissions are the keys a member is granted at creation. Empty for a
 	// root account, which is unrestricted within its company's entitlement.
 	Permissions []string
+
+	// Unaffiliated creates an account that belongs to no company yet: a
+	// driver registering from K-Trip before any transporter has adopted
+	// them. Without it, a registration with no parent and no company stands
+	// up a whole new tenant, which is the last thing a driver should be able
+	// to do from a phone. The account has no role and reaches nothing until
+	// a planner looks the username up and adopts it (DriverAccountService).
+	Unaffiliated bool
 }
 
 // Register creates an account, and a company when the account is a root one.
@@ -88,7 +96,10 @@ func (s *UserService) Register(ctx context.Context, in RegisterInput) (*models.U
 	// It is NOT a person's access any more. Someone joining an existing company
 	// gets that from the role they are assigned, so requiring it here would ask
 	// the caller for a value nothing reads.
-	if in.ParentID == nil && in.CompanyID == nil && in.Role == "" {
+	if in.Unaffiliated && (in.ParentID != nil || in.CompanyID != nil) {
+		return nil, fmt.Errorf("%w: an unaffiliated registration cannot name a company", ErrValidation)
+	}
+	if in.ParentID == nil && in.CompanyID == nil && !in.Unaffiliated && in.Role == "" {
 		return nil, errors.New("role is required when registering a new company: " +
 			"it says whether the company ships or transports")
 	}
@@ -104,8 +115,9 @@ func (s *UserService) Register(ctx context.Context, in RegisterInput) (*models.U
 
 	companyID := in.CompanyID
 	// True when this registration is standing up a whole new tenant, in which
-	// case the account becomes its administrator.
-	newTenant := in.ParentID == nil && in.CompanyID == nil
+	// case the account becomes its administrator. An unaffiliated driver is
+	// the one case with no parent and no company that does NOT create one.
+	newTenant := in.ParentID == nil && in.CompanyID == nil && !in.Unaffiliated
 
 	var user *models.User
 

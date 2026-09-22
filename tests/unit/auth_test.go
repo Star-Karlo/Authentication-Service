@@ -15,10 +15,12 @@ func TestValidatePasswordStrength(t *testing.T) {
 		password string
 		wantErr  bool
 	}{
-		{"too short", "ab1", true},
-		{"letters only", "password", true},
-		{"digits only", "12345678", true},
-		{"valid", "password1", false},
+		{"too short", "12345", true},
+		// A six-digit PIN is what a driver types into K-Trip, and 123456 is
+		// the planner's default for a new driver account.
+		{"six digits", "123456", false},
+		{"digits only", "12345678", false},
+		{"letters only", "password", false},
 		{"valid mixed", "Str0ngPassword", false},
 		// bcrypt silently ignores bytes past 72, so a longer password would
 		// give the user a false sense of strength.

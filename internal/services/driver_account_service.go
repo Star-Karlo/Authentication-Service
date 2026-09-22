@@ -2,10 +2,8 @@ package services
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/big"
 	"regexp"
 	"strings"
 	"time"
@@ -23,13 +21,21 @@ import (
 // Created on first use with just what the K-Trip app needs.
 const DriverRoleName = "Driver"
 
+// DefaultDriverPassword is the initial password for a driver the planner
+// registers without typing one: "123456", as the product specifies. It is
+// a first-login credential, not a secret — the planner reads it out or
+// WhatsApps it, and the driver changes it in the app. Six digits, because
+// K-Trip's password field is a numeric keypad.
+const DefaultDriverPassword = "123456"
+
 // DriverAccountService gives a master-data driver a login for K-Trip.
 //
 // Two ways in, both from the review:
 //
 //   - The planner registers the driver: an account is created here with a
-//     generated password, and the driver gets the app link plus credentials
-//     on WhatsApp. The planner sees the password once, in the response.
+//     derived username and the default password (or ones the planner typed),
+//     and the driver gets the app link plus credentials on WhatsApp. The
+//     planner sees the password once, in the response.
 //   - The driver registered themselves in K-Trip first and gave the planner
 //     their username: the planner looks it up and adopts the account into
 //     the company.
@@ -62,8 +68,8 @@ func NewDriverAccountService(
 type CreateDriverAccountInput struct {
 	FullName string
 	Phone    string
-	Username string // optional; derived from the name when empty
-	Password string // optional; generated when empty
+	Username string // optional; derived from the name and company initials when empty
+	Password string // optional; DefaultDriverPassword when empty
 	// SendWhatsApp delivers the credentials to the phone. Off when the
 	// planner will hand them over in person.
 	SendWhatsApp bool
@@ -96,20 +102,22 @@ func (s *DriverAccountService) Create(ctx context.Context, actorUserID, companyI
 	if phone == "" {
 		return nil, fmt.Errorf("%w: a WhatsApp number is required", ErrValidation)
 	}
+	role, err := s.ensureDriverRole(ctx, companyID)
+	if err != nil {
+		return nil, err
+	}
 	username := strings.TrimSpace(in.Username)
 	if username == "" {
-		username = usernameFrom(name)
+		username, err = s.deriveUsername(ctx, companyID, name)
+		if err != nil {
+			return nil, err
+		}
 	}
 	password := in.Password
 	generated := false
 	if password == "" {
-		password = generatePassword()
+		password = DefaultDriverPassword
 		generated = true
-	}
-
-	role, err := s.ensureDriverRole(ctx, companyID)
-	if err != nil {
-		return nil, err
 	}
 	user, err := s.register(ctx, RegisterInput{
 		Username:  username,
@@ -244,33 +252,71 @@ func toDriverAccount(u *models.User) *DriverAccount {
 	return a
 }
 
-// usernameFrom makes "Dwi Prasetyo" into "dwi.prasetyo" plus two digits, so
-// two drivers with the same name do not collide on the first try.
-func usernameFrom(name string) string {
-	base := usernameChars.ReplaceAllString(strings.ToLower(strings.Join(strings.Fields(name), ".")), "")
-	if len(base) > 20 {
-		base = base[:20]
-	}
+// deriveUsername builds the driver's login the way the planners asked for
+// it: first name + the company's initials, lower-case, letters and digits
+// only — "Budi Setiawan" at NTS is "budints". A second Budi at the same
+// company gets "budints01", a third "budints02", and so on: the suffix is
+// a sequence starting at 01, not a random number, so the planner can read
+// a list of drivers and see which is which.
+//
+// The company's initials are its abbreviation (the code on agreement
+// numbers) when it has one, else the first letters of its name.
+func (s *DriverAccountService) deriveUsername(ctx context.Context, companyID uuid.UUID, name string) (string, error) {
+	base := firstNameSlug(name) + s.companyInitials(ctx, companyID)
 	if base == "" {
 		base = "driver"
 	}
-	n, _ := rand.Int(rand.Reader, big.NewInt(90))
-	return fmt.Sprintf("%s%02d", base, n.Int64()+10)
+	taken, err := s.users.ExistsByUsername(ctx, base)
+	if err != nil {
+		return "", fmt.Errorf("derive username: %w", err)
+	}
+	if !taken {
+		return base, nil
+	}
+	for n := 1; n <= 99; n++ {
+		candidate := fmt.Sprintf("%s%02d", base, n)
+		taken, err := s.users.ExistsByUsername(ctx, candidate)
+		if err != nil {
+			return "", fmt.Errorf("derive username: %w", err)
+		}
+		if !taken {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("%w: every username from %s to %s99 is taken; enter one by hand", ErrValidation, base, base)
 }
 
-// generatePassword: eight characters a driver can type on a phone keyboard
-// without confusion (no 0/O, 1/l/I), satisfying the strength rule.
-func generatePassword() string {
-	const letters = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz"
-	const digits = "23456789"
-	var b strings.Builder
-	for i := 0; i < 6; i++ {
-		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(letters))))
-		b.WriteByte(letters[n.Int64()])
+// firstNameSlug: "Dwi Prasetyo" → "dwi". Letters and digits only, so a name
+// with punctuation or accents still yields something typeable.
+func firstNameSlug(name string) string {
+	fields := strings.Fields(name)
+	if len(fields) == 0 {
+		return ""
 	}
-	for i := 0; i < 2; i++ {
-		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(digits))))
-		b.WriteByte(digits[n.Int64()])
+	return usernameChars.ReplaceAllString(strings.ToLower(fields[0]), "")
+}
+
+// companyInitials is the abbreviation when the company has one, else the
+// initial of each word of its name ("PT Nusantara Cipta Logistik" → "pncl").
+// Empty when the company cannot be read: the username is then the first
+// name alone, still usable, rather than the registration failing.
+func (s *DriverAccountService) companyInitials(ctx context.Context, companyID uuid.UUID) string {
+	co, err := s.companies.FindByID(ctx, companyID)
+	if err != nil || co == nil {
+		return ""
+	}
+	if co.Abbreviation != nil {
+		if abbr := usernameChars.ReplaceAllString(strings.ToLower(*co.Abbreviation), ""); abbr != "" {
+			return abbr
+		}
+	}
+	var b strings.Builder
+	for _, w := range strings.Fields(co.Name) {
+		r := strings.ToLower(w[:1])
+		if usernameChars.MatchString(r) {
+			continue
+		}
+		b.WriteString(r)
 	}
 	return b.String()
 }
