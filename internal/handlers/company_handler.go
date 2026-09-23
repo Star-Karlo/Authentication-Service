@@ -133,10 +133,13 @@ type profileRequest struct {
 	CompanyProfile *string                 `json:"companyProfile"`
 	BankAccount    *map[string]interface{} `json:"bankAccount"`
 	Profile        *map[string]interface{} `json:"profile"`
-	// Settings.tripAllowance is the only setting the console edits here;
-	// the business toggles stay staff-only.
+	// The console edits Trip Allowance here, and the geofencing switch: a
+	// company decides for itself whether a driver may report arrival from
+	// outside the warehouse's fence. The remaining business toggles stay
+	// staff-only.
 	Settings *struct {
-		TripAllowance *map[string]interface{} `json:"tripAllowance"`
+		TripAllowance        *map[string]interface{} `json:"tripAllowance"`
+		FinishWithGeofencing *bool                   `json:"finishWithGeofencing"`
 	} `json:"settings"`
 }
 
@@ -255,15 +258,20 @@ func (h *CompanyHandler) updateProfile(c *gin.Context, id uuid.UUID) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	if req.Settings != nil && req.Settings.TripAllowance != nil {
-		// Settings is one JSONB column: read, replace the one key, write.
+	if req.Settings != nil && (req.Settings.TripAllowance != nil || req.Settings.FinishWithGeofencing != nil) {
+		// Settings is one JSONB column: read, replace the keys named, write.
 		current, err := h.companies.FindByID(c.Request.Context(), id)
 		if err != nil {
 			response.NotFound(c, "Company not found")
 			return
 		}
 		settings := current.Settings
-		settings.TripAllowance = *req.Settings.TripAllowance
+		if req.Settings.TripAllowance != nil {
+			settings.TripAllowance = *req.Settings.TripAllowance
+		}
+		if req.Settings.FinishWithGeofencing != nil {
+			settings.FinishWithGeofencing = *req.Settings.FinishWithGeofencing
+		}
 		fields["settings"] = settings
 	}
 	if err := h.companies.UpdateFields(c.Request.Context(), id, fields); err != nil {
