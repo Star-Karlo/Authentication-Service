@@ -21,14 +21,20 @@ import (
 // Created on first use with just what the K-Trip app needs.
 const DriverRoleName = "Driver"
 
-// DriverRolePermissions is what the K-Trip app calls: its own shipments
-// and orders, the two warehouses of a trip (address, pin, geofence radius,
-// PIC — GET /warehouses/{id} is behind warehouse.read) and the planned
-// road between them (GET /orders/{id}/routes, behind dispatch.read).
-// Without the last two the app silently showed warehouse names only.
+// DriverRolePermissions is what the K-Trip app calls: its own shipments and
+// its own orders, and nothing else.
+//
+// It briefly held warehouse.read and dispatch.read as well, so the app could
+// show an address and draw a route. Both are module keys: warehouse.read
+// reads every site the company has, and dispatch.read opens the planner's
+// live fleet map, driver activity and the candidate trucks for any order —
+// a great deal of company data on the device most likely to be lost or
+// shared. The business service now hands the trip's own two warehouses to
+// the shipment read and serves the driver's legs at
+// GET /shipments/{id}/route, which checks that the caller is the driver
+// assigned to it, so neither key is needed to do the job.
 var DriverRolePermissions = []string{
 	"tms:shipment.read", "tms:shipment.update", "tms:order.read",
-	"tms:warehouse.read", "tms:dispatch.read",
 }
 
 // DefaultDriverPassword is the initial password for a driver the planner
