@@ -21,6 +21,16 @@ import (
 // Created on first use with just what the K-Trip app needs.
 const DriverRoleName = "Driver"
 
+// DriverRolePermissions is what the K-Trip app calls: its own shipments
+// and orders, the two warehouses of a trip (address, pin, geofence radius,
+// PIC — GET /warehouses/{id} is behind warehouse.read) and the planned
+// road between them (GET /orders/{id}/routes, behind dispatch.read).
+// Without the last two the app silently showed warehouse names only.
+var DriverRolePermissions = []string{
+	"tms:shipment.read", "tms:shipment.update", "tms:order.read",
+	"tms:warehouse.read", "tms:dispatch.read",
+}
+
 // DefaultDriverPassword is the initial password for a driver the planner
 // registers without typing one: "123456", as the product specifies. It is
 // a first-login credential, not a secret — the planner reads it out or
@@ -215,6 +225,25 @@ func (s *DriverAccountService) List(ctx context.Context, companyID uuid.UUID) ([
 func (s *DriverAccountService) ensureDriverRole(ctx context.Context, companyID uuid.UUID) (*models.Role, error) {
 	role, err := s.roles.FindByName(ctx, companyID, DriverRoleName)
 	if err == nil {
+		// A role created before a key was added to the app's needs is
+		// topped up here, so a company's drivers are not left behind by an
+		// app update. Drivers already signed in see it on their next login.
+		missing := false
+		have := map[string]bool{}
+		for _, p := range role.Permissions {
+			have[p] = true
+		}
+		for _, p := range DriverRolePermissions {
+			if !have[p] {
+				missing = true
+				role.Permissions = append(role.Permissions, p)
+			}
+		}
+		if missing && role.IsSystem {
+			if uerr := s.roles.Update(ctx, companyID, role.ID, map[string]interface{}{"permissions": role.Permissions}); uerr != nil {
+				return nil, fmt.Errorf("driver role: %w", uerr)
+			}
+		}
 		return role, nil
 	}
 	if !errors.Is(err, repository.ErrNotFound) {
@@ -225,7 +254,7 @@ func (s *DriverAccountService) ensureDriverRole(ctx context.Context, companyID u
 		CompanyID:   companyID,
 		Name:        DriverRoleName,
 		Description: &desc,
-		Permissions: []string{"tms:shipment.read", "tms:shipment.update", "tms:order.read"},
+		Permissions: append([]string(nil), DriverRolePermissions...),
 		IsSystem:    true,
 	}
 	if err := s.roles.Create(ctx, role); err != nil {
