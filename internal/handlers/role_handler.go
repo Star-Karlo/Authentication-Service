@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -20,11 +21,12 @@ import (
 // permission model dynamic, and it is why these endpoints are scoped to the
 // caller's company with no way to name another.
 type RoleHandler struct {
-	roles *repository.RoleRepository
+	roles   *repository.RoleRepository
+	modules *repository.ModuleRepository
 }
 
-func NewRoleHandler(roles *repository.RoleRepository) *RoleHandler {
-	return &RoleHandler{roles: roles}
+func NewRoleHandler(roles *repository.RoleRepository, modules *repository.ModuleRepository) *RoleHandler {
+	return &RoleHandler{roles: roles, modules: modules}
 }
 
 func roleCaller(c *gin.Context) (authctx.Principal, uuid.UUID, bool) {
@@ -92,12 +94,46 @@ func (h *RoleHandler) List(c *gin.Context) {
 
 	response.OK(c, gin.H{
 		"roles": roles,
-		// The grantable set, from the token's own product access. An
-		// administrator cannot hand out what the company has not been sold, so
-		// offering it in the editor would be offering a checkbox that does
-		// nothing.
-		"assignable": principal.GrantablePermissions(product),
+		// The grantable set for the company being administered — NOT for the
+		// caller. An administrator cannot hand out what the company has not
+		// been sold, so offering it in the editor would be offering a checkbox
+		// that does nothing.
+		//
+		// The caller's own access is the wrong source whenever the two differ,
+		// and for Karlo staff they always do: a staff principal holds every
+		// feature there is, so the extra-permissions dialog offered a client's
+		// member all 65 TMS keys while the client was entitled to 15. Ticking
+		// any of the rest made the save refuse the whole list — "not entitled
+		// to invoice, which gates invoice.read" — so nothing was stored and
+		// reopening the dialog showed it empty. Scoping the offer to the
+		// company that the save is vetted against is what keeps the editor
+		// from proposing a key the save will reject.
+		"assignable": h.assignableFor(c, companyID, principal, product),
 	})
+}
+
+// assignableFor is what the company being administered may actually grant.
+//
+// It resolves the company's entitlement rather than reading the caller's token,
+// and falls back to the caller's own grantable set only when there is no
+// company to resolve — an unaffiliated principal — so a failure here can never
+// silently offer more than a company holds.
+func (h *RoleHandler) assignableFor(
+	c *gin.Context,
+	companyID uuid.UUID,
+	principal authctx.Principal,
+	product authctx.Product,
+) []authctx.PermissionSpec {
+	if h.modules == nil || companyID == uuid.Nil {
+		return principal.GrantablePermissions(product)
+	}
+	held, err := h.modules.ActiveForCompany(c.Request.Context(), companyID, product)
+	if err != nil {
+		slog.ErrorContext(c.Request.Context(), "could not resolve grantable permissions",
+			"companyId", companyID, "product", product, "error", err)
+		return principal.GrantablePermissions(product)
+	}
+	return authctx.GrantableFrom(product, held)
 }
 
 // keysOf is the subset of a role's qualified keys belonging to one product.

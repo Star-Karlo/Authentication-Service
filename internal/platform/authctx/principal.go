@@ -117,8 +117,6 @@ func (p Principal) CompanyHasFeature(product Product, feature string) bool {
 // company without accounting sees no accounting section in the permission
 // editor rather than one that appears to work and then does nothing.
 func (p Principal) GrantablePermissions(product Product) []PermissionSpec {
-	catalog := CatalogFor(product)
-
 	var held []string
 	if p.IsPlatformStaff {
 		held = FeaturesFor(product)
@@ -130,6 +128,21 @@ func (p Principal) GrantablePermissions(product Product) []PermissionSpec {
 		held = access.Features
 	}
 
+	return GrantableFrom(product, held)
+}
+
+// GrantableFrom narrows a product's catalogue to the features actually held.
+//
+// Three callers need this answer and they must not disagree: a token's own
+// grantable set (above), the one an administration screen is sent, and the one
+// the save is vetted against. When the first two were computed differently the
+// permission dialog offered keys the save then refused, which looked to an
+// administrator like permissions that would not save.
+//
+// held is the feature list — not permission keys — resolved for whichever
+// company is being administered.
+func GrantableFrom(product Product, held []string) []PermissionSpec {
+	catalog := CatalogFor(product)
 	out := make([]PermissionSpec, 0, len(catalog))
 	for _, spec := range catalog {
 		// Ungated permissions are always assignable.

@@ -224,7 +224,7 @@ func run() error {
 		// The Karlo staff surface for deciding what a company has bought.
 		Entitlement: handlers.NewEntitlementHandler(entitlementService),
 		Companies:   handlers.NewCompanyHandler(companyRepo, moduleRepo),
-		Roles:       handlers.NewRoleHandler(roleRepo),
+		Roles:       handlers.NewRoleHandler(roleRepo, moduleRepo),
 	})
 
 	httpSrv := &http.Server{

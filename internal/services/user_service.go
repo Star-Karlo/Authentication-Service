@@ -630,18 +630,7 @@ func (s *UserService) GrantablePermissions(ctx context.Context, companyID uuid.U
 		return nil, fmt.Errorf("resolve company entitlement: %w", err)
 	}
 
-	held := make(map[string]bool, len(entitled))
-	for _, m := range entitled {
-		held[m] = true
-	}
-
-	var out []authctx.PermissionSpec
-	for _, spec := range authctx.CatalogFor(product) {
-		if spec.Feature == "" || held[spec.Feature] {
-			out = append(out, spec)
-		}
-	}
-	return out, nil
+	return authctx.GrantableFrom(product, entitled), nil
 }
 
 // SetProductAccess gives a member access to a product, or changes the access
