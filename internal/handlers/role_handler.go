@@ -18,8 +18,13 @@ import (
 //
 // Roles are the company's, not the platform's: each defines its own — "Sales",
 // "Planner", "Finance" — and assigns them to its people. That is what makes the
-// permission model dynamic, and it is why these endpoints are scoped to the
-// caller's company with no way to name another.
+// permission model dynamic.
+//
+// Which company a request is about is never taken from the body: it is the
+// caller's own, or the client Karlo staff are acting for via X-Acting-For,
+// resolved by scopeCompany. A tenant therefore cannot name another, while
+// staff administering a client see that client's roles and the catalogue it is
+// actually entitled to.
 type RoleHandler struct {
 	roles   *repository.RoleRepository
 	modules *repository.ModuleRepository

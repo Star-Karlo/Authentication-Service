@@ -54,7 +54,7 @@ other way would hand out a token granting everything until it expired.
 Two consequences worth knowing before reading the code:
 
 - **A root account no longer bypasses module checks.** It is unrestricted only *within* its company's entitlement. The flag is read from `users.account_type = 'mainAccount'` rather than inferred from an absent `parent_id` — inference failed **open**, promoting any member whose parent was never recorded to unrestricted access.
-- **An administrator cannot grant a module the company does not hold.** `SetPermission` refuses it, and the permission editor renders exactly the entitlement, so there is nothing to tick.
+- **An administrator cannot grant a module the company does not hold.** `SetPermission` refuses it, and the permission editor renders exactly the entitlement, so there is nothing to tick. The entitlement rendered is the **administered** company's, resolved by `GET /roles` from `scopeCompany` — so a staff member acting for a client with `X-Acting-For` is offered the client's catalogue and not their own, which is every feature there is. The offer is narrowed by one shared function, `authctx.GrantableFrom`, from the same company entitlement that `assertGrantable` vets the save against, so the editor cannot propose a key the save will reject.
 
 `superadmin` and `admin` are Karlo staff, not tenants, and no company's
 entitlement applies to them.
